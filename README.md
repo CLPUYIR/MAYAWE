@@ -68,5 +68,5 @@ MAYAwe is actively exploring:
 
 ---
 <div align="center">
-  <i>Built by Abhiram — National Institute of Technology, Tiruchirappalli</i>
+  <i>Built by Abhishek Karthik PS — National Institute of Technology, Tiruchirappalli</i>
 </div>
