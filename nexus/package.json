@@ -1,0 +1,9 @@
+{
+  "name": "mayawe-nexus",
+  "version": "0.1.0",
+  "description": "MAYAwe Nexus Engine - PC Receiver Node",
+  "main": "server.js",
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
