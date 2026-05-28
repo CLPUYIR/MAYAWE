@@ -6,20 +6,23 @@ MAYAwe aims to democratize immersive technology (AR/VR/MR) by transforming ordin
 ## 2. System Architecture & Hierarchy (Refined)
 The system follows a three-tier **High-Speed Distributed Hierarchy**:
 
-### Tier 1: MAYAwe Imager (The Senses & Display)
+### Tier 1: MAYAwe Imager & Vision Nodes (The Senses & Display)
 - **Role:** High-speed data acquisition and AR Overlay.
-- **Hardware:** Smartphone + Google Cardboard (or similar VR/AR viewer).
+- **Hardware:** 
+    - Primary: Smartphone + Google Cardboard (Display + Spatial Camera).
+    - Secondary: Laptop Webcam + Optional 3rd Camera (Vision Nodes).
 - **Function:** 
-    - Captures high-frequency sensor telemetry and **live camera feed**.
-    - Receives virtual object data and coordinates back from the Nexus.
-    - **AR Overlay:** Renders virtual artifacts (like the AI Pet) directly over the live camera stream.
+    - **Multi-View Capture:** Synchronized streaming of multiple camera angles (Phone + Laptop + Extra) to the Nexus.
+    - **Sensing:** Captures high-frequency sensor telemetry and live feeds.
+    - **AR Overlay:** Renders the AI Pet and virtual artifacts onto the primary phone display.
 
-### Tier 2: Nexus Engine (The Local Coordinator)
-- **Role:** High-speed processing hub.
+### Tier 2: Nexus Engine (The Local Coordinator & Spatial Solver)
+- **Role:** High-speed processing and Vision Hub.
 - **Hardware:** Local PC (connected via high-speed P2P/LAN - similar to Nearby Share speeds).
 - **Function:** 
-    - Real-time sensor fusion and spatial coordinate management.
-    - Local physics simulation for virtual objects.
+    - **3D Triangulation:** Aggregates video from the 3-camera setup to track the user's body (Pose Estimation) and hands (Gesture Recognition) in 3D space.
+    - **Sensor Fusion:** Combines IMU data from the phone with visual tracking from the vision nodes.
+    - **Local Physics:** Manages the AI Pet's physical interactions based on the solved 3D space.
     - Bridges the local "Senses" (Imager) with the "Global Intelligence" (Aether Cloud).
 
 ### Tier 3: Aether Cloud (The Global Intelligence)
@@ -32,17 +35,19 @@ The system follows a three-tier **High-Speed Distributed Hierarchy**:
 
 ## 3. The AI Pet Concept: Spatial Awareness & Interaction
 The core of the MAYAwe experience is an **AR/MR AI Pet** that exists within the user's physical space:
-- **Physical Interaction:** The pet understands geometry; it can walk across a floor, jump onto a detected table, and sit on physical surfaces.
-- **Educational Assistance:** The pet acts as an interactive guide. It can point to a specific component (e.g., "Rotate this exact screw to calibrate the instrument") and explain its function.
+- **Physical Interaction:** The pet understands geometry (floors, tables) and **User Presence**. It can walk toward the user, jump on a table they are pointing at, or react to hand gestures.
+- **Gestural Control:** The user can interact with the pet using natural hand movements (e.g., "come here" gesture, pointing at an object, or petting the AI Pet in 3D space).
+- **Educational Assistance:** The pet acts as an interactive guide. It can point to a specific component and use the 3-camera tracking to verify if the user is looking at or touching the correct part (e.g., "Rotate this exact screw to calibrate the instrument").
 - **Learning Loop:** The user can interact with the pet to teach it about new objects, which the Aether Cloud then processes to update its spatial knowledge base.
 
 ## 4. Data Flow Process (DHPA 2.0)
-1.  **Capture:** Imager captures camera + IMU data.
-2.  **P2P Stream:** High-speed, low-latency stream to Nexus (Local PC) using optimized file-sharing style protocols for raw data.
-3.  **Cloud Analysis:** Nexus sends key frames/data to Aether Cloud for deep spatial analysis (Object Recognition/LLM).
-4.  **Spatial Feedback:** Aether returns semantic data and AI Pet logic to Nexus.
-5.  **Overlay:** Nexus sends virtual object coordinates and mesh data back to the Imager.
-6.  **AR Render:** The Imager overlays the AI Pet and guidance artifacts onto the user's view.
+1.  **Multi-Capture:** Imager (Phone) and Vision Nodes (Webcam/Extra) capture synchronized video + IMU.
+2.  **P2P Stream:** High-speed streaming of all feeds to Nexus using WebRTC/NDI (Nearby Share style protocols).
+3.  **Spatial Solving:** Nexus performs 3D pose/gesture reconstruction using the multi-camera array.
+4.  **Cloud Analysis:** Nexus sends key frames and 3D pose data to Aether Cloud for deep semantic understanding.
+5.  **Intelligence Loop:** Aether returns Pet behavior logic based on the user's gestures and environment.
+6.  **Overlay:** Nexus sends final artifact coordinates back to the Imager.
+7.  **AR Render:** The Imager overlays the interactive AI Pet onto the user's vision.
 
 ## 5. Telemetry Data Schema (V1)
 To ensure interoperability between different Imagers and Nexus engines, all telemetry must follow this JSON structure:
