@@ -1,5 +1,5 @@
 // MAYAwe V2 Imager: Main Stereoscopic AR & AI Pet Client
-// Features: Google Cardboard Stereo, Asynchronous TimeWarp (ATW), Invisible Depth-Occlusion,
+// Features: Google Cardboard Stereo, Low-Latency Pose Tracking, Invisible Depth-Occlusion,
 // and Surface-Aware Physics State Machine (Climbing Chairs, Hiding Under Bed)
 
 (function () {
@@ -15,6 +15,7 @@
     const permStatusEl = document.getElementById('perm-status');
     const toggleStereoBtn = document.getElementById('toggle-stereo-btn');
     const togglePlanesBtn = document.getElementById('toggle-planes-btn');
+    const toggleWebxrBtn = document.getElementById('toggle-webxr-btn');
     const recenterBtn = document.getElementById('recenter-btn');
     const actionBtn = document.getElementById('action-btn');
     const stereoDivider = document.getElementById('stereo-divider');
@@ -64,7 +65,8 @@
     // Camera Orientation Math
     const euler = new THREE.Euler();
     const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -PI/2 around X
-    const atwQuaternion = new THREE.Quaternion();
+    const cameraQuaternion = new THREE.Quaternion();
+    let lastDirectiveSeq = -1;
 
     // Timing metrics
     let frameCount = 0;
@@ -334,6 +336,28 @@
 
     togglePlanesBtn.addEventListener('click', toggleDebugPlanes);
 
+    if (toggleWebxrBtn) {
+        toggleWebxrBtn.addEventListener('click', async () => {
+            if (!navigator.xr) {
+                speechContent.innerText = "WebXR not supported on this device/browser. Using 60Hz IMU orientation.";
+                return;
+            }
+            try {
+                const success = await window.MAYAweSensors.startWebXRSession(renderer);
+                if (success) {
+                    toggleWebxrBtn.classList.add('active');
+                    speechContent.innerText = "WebXR 6-DoF tracking session active!";
+                    modeBadge.innerText = "AR: WEBXR 6-DOF";
+                } else {
+                    speechContent.innerText = "WebXR session rejected or unavailable. Falling back to 60Hz IMU.";
+                }
+            } catch (e) {
+                console.warn("[MAYAwe] WebXR start failed:", e);
+                speechContent.innerText = "WebXR fallback: continuing with 60Hz IMU.";
+            }
+        });
+    }
+
     /**
      * Step 5: Google Cardboard Stereoscopic Mode Toggle
      */
@@ -418,16 +442,22 @@
             });
         }
 
-        // 3. Pet Directives & Speech
+        // 3. Pet Directives & Speech (sequence tracked to prevent overwrites)
         if (packet.petDirective) {
             const dir = packet.petDirective;
-            if (dir.state) petState.mode = dir.state;
-            if (dir.targetPosition) {
-                petState.targetPos.set(dir.targetPosition.x, dir.targetPosition.y, dir.targetPosition.z);
-            }
-            if (dir.speechHud) {
-                speechContent.innerText = dir.speechHud;
-                speechBubble.style.opacity = '1';
+            const seq = dir.directiveSeq;
+            if (seq === undefined || seq === null || seq > lastDirectiveSeq) {
+                if (seq !== undefined && seq !== null) {
+                    lastDirectiveSeq = seq;
+                }
+                if (dir.state) petState.mode = dir.state;
+                if (dir.targetPosition) {
+                    petState.targetPos.set(dir.targetPosition.x, dir.targetPosition.y, dir.targetPosition.z);
+                }
+                if (dir.speechHud) {
+                    speechContent.innerText = dir.speechHud;
+                    speechBubble.style.opacity = '1';
+                }
             }
         }
 
@@ -487,7 +517,7 @@
 
     function recenterPet() {
         const forward = new THREE.Vector3(0, 0, -1.5);
-        forward.applyQuaternion(atwQuaternion);
+        forward.applyQuaternion(cameraQuaternion);
 
         petState.targetPos.copy(cameraMono.position).add(forward);
         petState.targetPos.y = 0.0; // Place on floor
@@ -617,17 +647,17 @@
     }
 
     /**
-     * Step 9: Asynchronous TimeWarp (ATW) & Stereoscopic Split-Screen Render Loop
+     * Step 9: Stereoscopic Split-Screen Render Loop & Low-Latency Pose Synchronization
      */
     function renderLoop(timestamp) {
         requestAnimationFrame(renderLoop);
 
         const dt = 0.016;
 
-        // 1. Asynchronous TimeWarp: update virtual camera orientation from live sensor IMU right before drawing
+        // 1. Update virtual camera orientation from live sensor IMU right before drawing
         const sensor = window.MAYAweSensors.state;
         if (sensor.isListening) {
-            updateAtwCameraOrientation(sensor.rotation.alpha, sensor.rotation.beta, sensor.rotation.gamma);
+            updateCameraOrientation(sensor.rotation.alpha, sensor.rotation.beta, sensor.rotation.gamma);
         }
 
         // 2. Physics & Kinematics Update
@@ -665,7 +695,7 @@
             renderer.setScissor(0, 0, width / 2, height);
             cameraLeft.position.copy(sensor.position);
             cameraLeft.position.x -= IPD / 2.0; // Left eye offset
-            cameraLeft.quaternion.copy(atwQuaternion);
+            cameraLeft.quaternion.copy(cameraQuaternion);
 
             // Render camera background quad, then 3D occluders + pet
             renderer.render(backgroundScene, bgCamera);
@@ -676,7 +706,7 @@
             renderer.setScissor(width / 2, 0, width / 2, height);
             cameraRight.position.copy(sensor.position);
             cameraRight.position.x += IPD / 2.0; // Right eye offset
-            cameraRight.quaternion.copy(atwQuaternion);
+            cameraRight.quaternion.copy(cameraQuaternion);
 
             renderer.render(backgroundScene, bgCamera);
             renderer.render(scene, cameraRight);
@@ -686,7 +716,7 @@
             // Standard Monocular AR Viewport
             renderer.setViewport(0, 0, width, height);
             cameraMono.position.copy(sensor.position);
-            cameraMono.quaternion.copy(atwQuaternion);
+            cameraMono.quaternion.copy(cameraQuaternion);
 
             renderer.render(backgroundScene, bgCamera);
             renderer.render(scene, cameraMono);
@@ -701,14 +731,14 @@
         }
     }
 
-    function updateAtwCameraOrientation(alpha, beta, gamma) {
+    function updateCameraOrientation(alpha, beta, gamma) {
         const alphaRad = alpha ? THREE.MathUtils.degToRad(alpha) : 0;
         const betaRad = beta ? THREE.MathUtils.degToRad(beta) : 0;
         const gammaRad = gamma ? THREE.MathUtils.degToRad(gamma) : 0;
 
         euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
-        atwQuaternion.setFromEuler(euler);
-        atwQuaternion.multiply(q1); // Look out the rear camera
+        cameraQuaternion.setFromEuler(euler);
+        cameraQuaternion.multiply(q1); // Look out the rear camera
     }
 
     function onWindowResize() {

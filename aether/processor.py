@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MAYAwe V2 Aether: Multi-Loop Vision, Metric Depth SLAM & Cloud VLM Engine
-- Fast Loop (30 Hz): Co-Located Dual-Camera (Laptop Outside-In + Phone Inside-Out) Hand & Pose Fusion
-- Medium Loop (5 Hz): Metric Depth Estimation & RANSAC 3D Furniture Plane Fitting
+MAYAwe V2 Aether: Multi-Loop Vision, Depth Plane Heuristics & Cloud VLM Engine
+- Fast Loop (30 Hz): Dual-Camera (Laptop Outside-In + Phone Inside-Out) Source Selection
+- Medium Loop (5 Hz): Heuristic 3D Furniture Plane Estimation
 - Slow Loop (0.5 Hz): Gemini 2.5 Flash Structured JSON Spatial Scene Graph + Offline Saliency
 """
 
@@ -129,16 +129,22 @@ def classify_hand_gesture(landmarks):
 
 
 # ==============================================================================
-# 3. Fast Loop (30 Hz): Dual-Camera Hand & Pose Fusion Engine
+# 3. Fast Loop (30 Hz): Dual-Camera Hand Tracking (Source Selection)
 # ==============================================================================
 
 class DualCameraHandTracker:
+    """
+    Tracks hands using available cameras.
+    Note: Camera-to-camera extrinsic calibration is not implemented (planned for V2.1).
+    Current logic selects the most confident available source:
+    - Laptop webcam is preferred when user is at desk.
+    - Phone rear camera is preferred when roaming.
+    """
     def __init__(self):
         self.laptop_cap = None
         self.laptop_detector = None
         self.phone_detector = None
         self.mode = "NONE"
-        self.last_sim_time = time.time()
         self.init_detectors()
 
     def init_detectors(self):
@@ -209,8 +215,9 @@ class DualCameraHandTracker:
 
     def read_dual_camera_hands(self, phone_frame_bgr=None, phone_pose_6dof=None):
         """
-        Processes both Outside-In (Laptop Webcam) and Inside-Out (Phone stream)
-        and performs confidence-weighted fusion in World Coordinates.
+        Source selection with confidence hint.
+        Known limitation: true extrinsic coordinate calibration is uncalibrated / planned for V2.1.
+        Laptop webcam is selected when active, otherwise phone stream is selected.
         """
         pts_laptop = None
         handedness_laptop = "Right"
@@ -225,36 +232,43 @@ class DualCameraHandTracker:
         if phone_frame_bgr is not None:
             pts_phone, handedness_phone = self.extract_landmarks(phone_frame_bgr, self.phone_detector)
 
-        # Confidence blending weights
         has_laptop = pts_laptop is not None
         has_phone = pts_phone is not None
 
-        if has_laptop and has_phone:
-            w_laptop = 0.5
-            w_phone = 0.5
-        elif has_laptop:
+        if has_laptop:
             w_laptop = 0.95
             w_phone = 0.05
+            selected_source = "laptop"
+            source_pts = pts_laptop
         elif has_phone:
             w_laptop = 0.05
             w_phone = 0.95
+            selected_source = "phone"
+            source_pts = pts_phone
         else:
-            # Fallback to simulated trajectory
-            return self._generate_synthetic_hand(), {"phone": 0.5, "laptop": 0.5}, "NONE", None
+            return self._generate_synthetic_hand(), {
+                "phone": 0.5,
+                "laptop": 0.5,
+                "selectedSource": "synthetic",
+                "calibrated": False
+            }, "NONE", None
 
-        # Transform and fuse points into World Coordinate Frame
+        # Position to world coordinates (in meters, Y=Up, Z=Forward)
         fused_pts = []
-        source_pts = pts_laptop if has_laptop else pts_phone
-
-        # Scale and position to world coordinates (in meters, Y=Up, Z=Forward)
-        for i, pt in enumerate(source_pts):
+        for pt in source_pts:
             wx = (pt.x - 0.5) * 1.6
             wy = 1.0 - (pt.y - 0.5) * 1.2
             wz = -0.5 - pt.z * 1.5
             fused_pts.append(Point3D(wx, wy, wz))
 
         gesture, raycast_target = classify_hand_gesture(source_pts)
-        return fused_pts, {"phone": round(w_phone, 2), "laptop": round(w_laptop, 2)}, gesture, raycast_target
+        weights_info = {
+            "phone": round(w_phone, 2),
+            "laptop": round(w_laptop, 2),
+            "selectedSource": selected_source,
+            "calibrated": False
+        }
+        return fused_pts, weights_info, gesture, raycast_target
 
     def _generate_synthetic_hand(self):
         t = time.time()
@@ -296,12 +310,15 @@ class DualCameraHandTracker:
 
 
 # ==============================================================================
-# 4. Medium Loop (5 Hz): Metric Depth & RANSAC Furniture Plane Extraction
+# 4. Medium Loop (5 Hz): Heuristic 3D Furniture Plane Estimation
 # ==============================================================================
 
-class RansacPlaneSolver:
+class HeuristicPlaneEstimator:
+    """
+    Estimates 3D room plane locations from screen contours and geometric heuristics.
+    Planes are tagged with source: 'default' | 'heuristic' | 'vlm'.
+    """
     def __init__(self):
-        # Default detected planes for room-scale spatial navigation
         self.planes = [
             {
                 "id": "plane_floor_0",
@@ -309,7 +326,8 @@ class RansacPlaneSolver:
                 "semanticLabel": "floor_carpet",
                 "center": {"x": 0.0, "y": 0.0, "z": -1.5},
                 "extents": {"w": 5.0, "d": 5.0, "h": 0.02},
-                "occluder": false
+                "occluder": False,
+                "source": "default"
             },
             {
                 "id": "plane_chair_1",
@@ -317,7 +335,8 @@ class RansacPlaneSolver:
                 "semanticLabel": "wooden_chair",
                 "center": {"x": 0.80, "y": 0.45, "z": -1.60},
                 "extents": {"w": 0.55, "d": 0.55, "h": 0.45},
-                "occluder": true
+                "occluder": True,
+                "source": "default"
             },
             {
                 "id": "zone_under_bed_1",
@@ -326,7 +345,8 @@ class RansacPlaneSolver:
                 "center": {"x": -1.10, "y": 0.0, "z": -2.10},
                 "extents": {"w": 1.40, "d": 1.90, "h": 0.32},
                 "overhangElevation": 0.35,
-                "occluder": true
+                "occluder": True,
+                "source": "default"
             },
             {
                 "id": "plane_desk_1",
@@ -334,14 +354,14 @@ class RansacPlaneSolver:
                 "semanticLabel": "work_desk",
                 "center": {"x": 0.0, "y": 0.75, "z": -0.80},
                 "extents": {"w": 1.20, "d": 0.70, "h": 0.75},
-                "occluder": true
+                "occluder": True,
+                "source": "default"
             }
         ]
 
     def process_depth_and_planes(self, image_bgr):
         """
-        Estimates metric depth and extracts 3D horizontal/vertical planes.
-        Uses depth gradient + contour geometric back-projection fallback.
+        Refines plane elevations and positions using heuristic contour analysis.
         """
         if image_bgr is None or cv2 is None:
             return self.planes
@@ -353,7 +373,6 @@ class RansacPlaneSolver:
             edges = cv2.Canny(blurred, 40, 120)
             contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            # Detect dominant horizontal bounding edges
             for c in contours:
                 area = cv2.contourArea(c)
                 if area > 1800:
@@ -361,21 +380,23 @@ class RansacPlaneSolver:
                     rel_y = by / float(h)
                     rel_x = (bx + bw / 2.0) / float(w)
 
-                    # Estimate metric elevation from vertical screen position
                     elevation = max(0.0, min(0.9, (1.0 - rel_y) * 0.95))
                     center_x = (rel_x - 0.5) * 2.5
                     center_z = -1.2 - (1.0 - rel_y) * 1.5
 
                     if 0.38 <= elevation <= 0.62:
-                        # Update chair/bed surface
                         self.planes[1]["center"] = {"x": round(center_x, 2), "y": round(elevation, 2), "z": round(center_z, 2)}
+                        self.planes[1]["source"] = "heuristic"
                     elif 0.68 <= elevation <= 0.92:
-                        # Update desk surface
                         self.planes[3]["center"] = {"x": round(center_x, 2), "y": round(elevation, 2), "z": round(center_z, 2)}
+                        self.planes[3]["source"] = "heuristic"
         except Exception:
             pass
 
         return self.planes
+
+# Backward-compatible alias
+RansacPlaneSolver = HeuristicPlaneEstimator
 
 
 # ==============================================================================
@@ -474,17 +495,22 @@ class VLMSceneGraphEngine:
 class AetherProcessorV2:
     def __init__(self):
         self.hand_tracker = DualCameraHandTracker()
-        self.plane_solver = RansacPlaneSolver()
+        self.plane_solver = HeuristicPlaneEstimator()
         self.vlm_engine = VLMSceneGraphEngine()
 
         self.latest_phone_frame = None
         self.latest_phone_pose = None
         self.last_keyframe_time = 0
+
+        # Monotonically increasing directive sequence tracking
+        self.directive_seq = 1
+        self.directive_changed = True
         self.current_directive = {
             "state": "IDLE_SCAN",
             "targetSurfaceId": "plane_floor_0",
             "targetPosition": {"x": 0.0, "y": 0.0, "z": -1.5},
-            "speechHud": "MAYAwe V2 ready. Exploring room geometry! 🐾"
+            "speechHud": "MAYAwe V2 ready. Exploring room geometry! 🐾",
+            "directiveSeq": self.directive_seq
         }
 
     def decode_frame(self, base64_str):
@@ -499,6 +525,30 @@ class AetherProcessorV2:
         except Exception:
             return None
 
+    def adopt_directive(self, state=None, target=None, surface_id=None, speech=None):
+        """
+        Adopts a new directive, updates state, and increments directiveSeq.
+        Only marks directive_changed if content actually differs.
+        """
+        changed = False
+        if state and state != self.current_directive.get("state"):
+            self.current_directive["state"] = state
+            changed = True
+        if target and target != self.current_directive.get("targetPosition"):
+            self.current_directive["targetPosition"] = target
+            changed = True
+        if surface_id and surface_id != self.current_directive.get("targetSurfaceId"):
+            self.current_directive["targetSurfaceId"] = surface_id
+            changed = True
+        if speech and speech != self.current_directive.get("speechHud"):
+            self.current_directive["speechHud"] = speech
+            changed = True
+
+        if changed:
+            self.directive_seq += 1
+            self.current_directive["directiveSeq"] = self.directive_seq
+            self.directive_changed = True
+
     async def run_fast_loop(self, websocket):
         """30 Hz Fast Loop: Dual-Camera Hand Tracking & Spatial State Broadcast"""
         interval = 1.0 / 30.0
@@ -506,29 +556,24 @@ class AetherProcessorV2:
         while True:
             t0 = time.perf_counter()
             try:
-                # 1. Dual-Camera Fusion (Laptop + Phone)
+                # 1. Hand Source Selection
                 landmarks, weights, gesture, raycast_target = self.hand_tracker.read_dual_camera_hands(
                     self.latest_phone_frame,
                     self.latest_phone_pose
                 )
 
-                # 2. Update Pet Directive from Gestures
+                # 2. Update Pet Directive from Active Gestures only (ignore NONE)
                 if gesture == "INDEX_POINT" and raycast_target:
-                    # Check if pointing at chair or bed
                     target_surface_id = "plane_chair_1" if abs(raycast_target["x"] - 0.8) < 0.6 else "plane_floor_0"
-                    self.current_directive["state"] = "CLIMB_CHAIR" if target_surface_id == "plane_chair_1" else "WALK_ON_SURFACE"
-                    self.current_directive["targetPosition"] = raycast_target
-                    self.current_directive["targetSurfaceId"] = target_surface_id
-                    self.current_directive["speechHud"] = f"Pointing detected! Jumping toward target ({raycast_target['x']:.2f}, {raycast_target['z']:.2f}) 🎯"
+                    state = "CLIMB_CHAIR" if target_surface_id == "plane_chair_1" else "WALK_ON_SURFACE"
+                    speech = f"Pointing detected! Moving toward target ({raycast_target['x']:.2f}, {raycast_target['z']:.2f}) 🎯"
+                    self.adopt_directive(state=state, target=raycast_target, surface_id=target_surface_id, speech=speech)
                 elif gesture == "OPEN_PALM":
-                    self.current_directive["state"] = "GREET_WAVE"
-                    self.current_directive["speechHud"] = "Wave received! Hello friend! 🐾👋"
+                    self.adopt_directive(state="GREET_WAVE", speech="Wave received! Hello friend! 🐾👋")
                 elif gesture == "PINCH":
-                    self.current_directive["state"] = "FOLLOW_USER"
-                    self.current_directive["speechHud"] = "Following your hands across the room... 🐾"
+                    self.adopt_directive(state="FOLLOW_USER", speech="Following your hands across the room... 🐾")
                 elif gesture == "FIST":
-                    self.current_directive["state"] = "SIT_STAY"
-                    self.current_directive["speechHud"] = "Sitting down on surface. 🧘"
+                    self.adopt_directive(state="SIT_STAY", speech="Sitting down on surface. 🧘")
 
                 # 3. Construct MAYAwe V2 Spatial World Update
                 lms_payload = [p.to_dict() for p in landmarks] if landmarks else []
@@ -543,9 +588,13 @@ class AetherProcessorV2:
                         "raycastTarget": raycast_target,
                         "landmarks": lms_payload
                     },
-                    "roomPlanes": self.plane_solver.planes,
-                    "petDirective": self.current_directive
+                    "roomPlanes": self.plane_solver.planes
                 }
+
+                # Include petDirective ONLY when it has changed
+                if self.directive_changed:
+                    packet_v2["petDirective"] = dict(self.current_directive)
+                    self.directive_changed = False
 
                 await websocket.send(json.dumps(packet_v2))
             except Exception:
@@ -555,7 +604,7 @@ class AetherProcessorV2:
             await asyncio.sleep(max(0.001, interval - dt))
 
     async def run_medium_loop(self):
-        """5 Hz Medium Loop: Metric Depth & RANSAC 3D Plane Extraction"""
+        """5 Hz Medium Loop: Heuristic 3D Plane Extraction"""
         interval = 1.0 / 5.0
         while True:
             t0 = time.perf_counter()
@@ -568,7 +617,7 @@ class AetherProcessorV2:
             await asyncio.sleep(max(0.001, interval - dt))
 
     async def handle_snapshot(self, websocket, packet):
-        """0.5 Hz Slow Loop: Cloud VLM Scene Understanding"""
+        """0.5 Hz Slow Loop: Cloud VLM Scene Understanding & Plane Merging"""
         now = time.time()
         if now - self.last_keyframe_time < 1.8:
             return
@@ -580,7 +629,33 @@ class AetherProcessorV2:
 
         parsed_scene, speech = await self.vlm_engine.analyze_scene(jpeg_b64)
         if speech:
-            self.current_directive["speechHud"] = speech
+            self.adopt_directive(speech=speech)
+
+        # Merge detectedSurfaces into plane_solver planes with source: 'vlm'
+        if parsed_scene and "detectedSurfaces" in parsed_scene and isinstance(parsed_scene["detectedSurfaces"], list):
+            valid_categories = {
+                "FLOOR", "CHAIR_OR_BED_SURFACE", "UNDER_BED_SHADOW_ZONE",
+                "DESK_OR_TABLE", "VERTICAL_OBSTACLE"
+            }
+            for surface in parsed_scene["detectedSurfaces"]:
+                category = surface.get("category")
+                if not category or category not in valid_categories:
+                    continue  # Skip any surface that does not match a plane category
+
+                for plane in self.plane_solver.planes:
+                    if plane.get("class") == category:
+                        plane["source"] = "vlm"
+                        if "label" in surface:
+                            plane["semanticLabel"] = surface["label"]
+                        if "estimatedElevationMeters" in surface:
+                            try:
+                                plane["center"]["y"] = float(surface["estimatedElevationMeters"])
+                            except (ValueError, TypeError):
+                                pass
+                        if "canPetClimb" in surface:
+                            plane["canPetClimb"] = bool(surface["canPetClimb"])
+                        if "canPetHide" in surface:
+                            plane["canPetHide"] = bool(surface["canPetHide"])
 
     async def connect_and_run(self, uri="ws://localhost:8080"):
         print(f"[*] Aether V2 connecting to Nexus at {uri}...")
@@ -595,7 +670,6 @@ class AetherProcessorV2:
                         "v2Supported": True
                     }))
 
-                    # Launch Fast (30Hz) and Medium (5Hz) producer tasks
                     fast_task = asyncio.create_task(self.run_fast_loop(websocket))
                     medium_task = asyncio.create_task(self.run_medium_loop())
 
@@ -612,10 +686,19 @@ class AetherProcessorV2:
                                 elif ptype == "camera_keyframe":
                                     await self.handle_snapshot(websocket, packet)
                                 elif ptype == "dashboard_command":
-                                    if packet.get("gesture"):
-                                        self.current_directive["state"] = packet["gesture"]
-                                    if packet.get("speech"):
-                                        self.current_directive["speechHud"] = packet["speech"]
+                                    state = packet.get("gesture") or packet.get("petState", {}).get("mode")
+                                    target = packet.get("petState", {}).get("targetPosition")
+                                    speech = packet.get("speech") or packet.get("petState", {}).get("speechText")
+                                    self.adopt_directive(state=state, target=target, speech=speech)
+                                elif ptype == "SPATIAL_WORLD_UPDATE_V2":
+                                    if "petDirective" in packet and packet["petDirective"]:
+                                        dir_data = packet["petDirective"]
+                                        self.adopt_directive(
+                                            state=dir_data.get("state"),
+                                            target=dir_data.get("targetPosition"),
+                                            surface_id=dir_data.get("targetSurfaceId"),
+                                            speech=dir_data.get("speechHud")
+                                        )
                             except Exception:
                                 pass
                     finally:
@@ -642,7 +725,7 @@ if __name__ == "__main__":
         nexus_url = sys.argv[1]
 
     print("\n================================================================")
-    print("      MAYAwe V2 — Spatial AI, Depth SLAM & Cloud VLM Engine     ")
+    print("   MAYAwe V2 — Spatial AI, Plane Heuristics & Cloud VLM Engine  ")
     print("================================================================")
     print(f"[*] Target Hub:     {nexus_url}")
     print(f"[*] Gemini Status:  {'Active (API Key detected)' if os.environ.get('GEMINI_API_KEY') else 'Offline Mode (Local Contour Detection)'}")

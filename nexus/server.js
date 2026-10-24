@@ -61,7 +61,7 @@ const spatialState = {
     dualHandPose: {
         active: false,
         gesture: 'NONE',
-        weights: { phone: 0.5, laptop: 0.5 },
+        weights: { phone: 0.5, laptop: 0.5, selectedSource: 'none', calibrated: false },
         wristWorld: { x: 0.0, y: 1.0, z: -0.5 },
         raycastTarget: { x: 0.0, y: 0.0, z: -1.5, surfaceId: 'plane_floor_0' },
         landmarks: []
@@ -75,7 +75,8 @@ const spatialState = {
             semanticLabel: 'floor_carpet',
             center: { x: 0.0, y: 0.0, z: -1.5 },
             extents: { w: 5.0, d: 5.0, h: 0.02 },
-            occluder: false
+            occluder: false,
+            source: 'default'
         },
         {
             id: 'plane_chair_1',
@@ -83,7 +84,8 @@ const spatialState = {
             semanticLabel: 'wooden_chair',
             center: { x: 0.80, y: 0.45, z: -1.60 },
             extents: { w: 0.55, d: 0.55, h: 0.45 },
-            occluder: true
+            occluder: true,
+            source: 'default'
         },
         {
             id: 'zone_under_bed_1',
@@ -92,7 +94,8 @@ const spatialState = {
             center: { x: -1.10, y: 0.0, z: -2.10 },
             extents: { w: 1.40, d: 1.90, h: 0.32 },
             overhangElevation: 0.35,
-            occluder: true
+            occluder: true,
+            source: 'default'
         },
         {
             id: 'plane_desk_1',
@@ -100,7 +103,8 @@ const spatialState = {
             semanticLabel: 'work_desk',
             center: { x: 0.0, y: 0.75, z: -0.80 },
             extents: { w: 1.20, d: 0.70, h: 0.75 },
-            occluder: true
+            occluder: true,
+            source: 'default'
         }
     ],
 
@@ -111,6 +115,7 @@ const spatialState = {
         targetPosition: { x: 0.0, y: 0.0, z: -1.5 },
         targetSurfaceId: 'plane_floor_0',
         speechText: 'MAYAwe V2 ready. Exploring room geometry!',
+        directiveSeq: 1,
         speechTimestamp: Date.now()
     },
 
@@ -213,7 +218,6 @@ function handleConnection(ws, req, protocolName) {
                 // 15 Hz CV Keyframe (640x360) from Phone for Inside-Out MediaPipe
                 case 'IMAGER_CV_FRAME': {
                     cvFrameCountWindow++;
-                    // Stream directly to Aether for inside-out hand tracking
                     broadcastToRoles(['aether'], message.toString(), ws);
                     break;
                 }
@@ -245,6 +249,7 @@ function handleConnection(ws, req, protocolName) {
                         if (dir.state) spatialState.petState.mode = dir.state;
                         if (dir.targetPosition) spatialState.petState.targetPosition = dir.targetPosition;
                         if (dir.targetSurfaceId) spatialState.petState.targetSurfaceId = dir.targetSurfaceId;
+                        if (dir.directiveSeq) spatialState.petState.directiveSeq = dir.directiveSeq;
                         if (dir.speechHud) {
                             spatialState.petState.speechText = dir.speechHud;
                             spatialState.petState.speechTimestamp = Date.now();
@@ -271,16 +276,22 @@ function handleConnection(ws, req, protocolName) {
                     if (packet.petState) {
                         spatialState.petState = { ...spatialState.petState, ...packet.petState };
                     }
+                    const directiveSeq = Date.now();
                     const worldDirective = {
                         type: 'SPATIAL_WORLD_UPDATE_V2',
                         timestamp: Date.now(),
                         petDirective: {
                             state: packet.gesture || packet.petState?.mode || 'IDLE_SCAN',
                             targetPosition: packet.petState?.targetPosition || spatialState.petState.targetPosition,
-                            speechHud: packet.speech || spatialState.petState.speechText
+                            speechHud: packet.speech || spatialState.petState.speechText,
+                            directiveSeq: directiveSeq
                         }
                     };
+                    // Forward directive to both imager and aether
                     broadcastToRoles(['imager', 'aether'], JSON.stringify(worldDirective));
+                    // Also forward raw dashboard_command with directiveSeq to aether
+                    packet.directiveSeq = directiveSeq;
+                    broadcastToRoles(['aether'], JSON.stringify(packet), ws);
                     break;
                 }
 

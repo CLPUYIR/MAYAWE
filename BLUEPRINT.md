@@ -5,23 +5,23 @@
 
 ## 1. System Overview
 
-MAYAwe V2 upgrades the original handheld magic-window MVP into a **hands-free, room-scale spatial computing system** using a **Google Cardboard headset**, a **Laptop GPU/CPU Hub**, and **Cloud Multimodal AI**. By fusing the phone's Inside-Out camera with the laptop's Outside-In webcam in a shared 3D coordinate frame, the virtual robot pet (**"MAYA"**) understands room geometry—climbing onto real chairs, jumping onto beds, and hiding under furniture with accurate physical depth occlusion.
+MAYAwe V2 upgrades the original handheld magic-window MVP into a **hands-free, room-scale spatial computing system** using a **Google Cardboard headset**, a **Laptop GPU/CPU Hub**, and **Cloud Multimodal AI**. By combining the phone's Inside-Out camera with the laptop's Outside-In webcam in a shared 3D coordinate frame, the virtual robot pet (**"MAYA"**) understands room geometry—climbing onto real chairs, jumping onto beds, and hiding under furniture with accurate physical depth occlusion.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ TIER 1: 📱 MOBILE IMAGER (Smartphone in Google Cardboard Headset)          │
-│ • Stereoscopic Split-Screen WebGL Renderer (60 FPS) + Barrel Distortion    │
-│ • Asynchronous TimeWarp (ATW) & WebXR / 6-DoF VIO Pose Tracking (<15ms)    │
+│ • Stereoscopic Split-Screen WebGL Renderer (60 FPS) + Center Divider       │
+│ • Low-Latency Orientation Tracking & WebXR / 6-DoF VIO Fallback           │
 │ • Invisible Depth-Occlusion Proxies (Clips MAYA behind real chairs/beds)   │
 │ • 60 Hz IMU Telemetry + 15 Hz Egocentric CV Stream + 0.5 Hz Keyframes      │
 └─────────────────────────────────────┬──────────────────────────────────────┘
                                       │ HTTPS / WSS:8443 (Low-Latency LAN)
                                       ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
-│ TIER 2: 💻 NEXUS ENGINE (Laptop Spatial Broker & 3DGS/Plane Dashboard)     │
+│ TIER 2: 💻 NEXUS ENGINE (Laptop Spatial Broker & 3D Dashboard)             │
 │ • Auto-Generated Self-Signed LAN TLS (cert.pem / key.pem)                  │
 │ • Unified Spatial State Broker (phonePose6DoF, dualHandPose, roomPlanes)   │
-│ • Sim(3) Extrinsic Calibration & Drift-Locking Coordinate Broker           │
+│ • Visualizes both camera frustums (T_laptop_to_world, T_phone_to_world)    │
 │ • Real-Time 3D Spatial Dashboard (https://localhost:8443/dashboard)        │
 └─────────────────────────────────────┬──────────────────────────────────────┘
                                       │ Local IPC / Bidirectional WS Loop
@@ -29,8 +29,8 @@ MAYAwe V2 upgrades the original handheld magic-window MVP into a **hands-free, r
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ TIER 3: 🧠 AETHER SPATIAL INTELLIGENCE ENGINE (Python Multi-Loop Solver)   │
 │ • FAST LOOP (30 Hz): Dual-Camera MediaPipe Hands (Phone Inside-Out +       │
-│   Laptop Outside-In) with Kalman Confidence Blending (w_phone, w_pc)       │
-│ • MEDIUM LOOP (5 Hz): Metric Depth Estimation + RANSAC 3D Plane Fitting    │
+│   Laptop Outside-In) with Source Selection (w_phone, w_laptop)             │
+│ • MEDIUM LOOP (5 Hz): Heuristic Contour & Elevation 3D Furniture Planes    │
 │   (FLOOR, CHAIR_OR_BED_SURFACE, DESK_OR_TABLE, UNDER_BED_ZONE)             │
 │ • SLOW LOOP (0.5 Hz): Gemini 2.5 Flash Structured JSON Spatial Scene Graph │
 │   + Offline OpenCV Contour/Disparity Fallback                              │
@@ -47,30 +47,29 @@ All three modules communicate using a right-handed metric **World Coordinate Sys
 - **Laptop Webcam Transform:** $\mathbf{T}_{\text{laptop}\rightarrow\text{world}} \in \text{SE}(3)$ (Static anchor at desk elevation $y \approx 0.75\text{ m}$)
 - **Phone Headset Transform:** $\mathbf{T}_{\text{phone}\rightarrow\text{world}}(t) \in \text{SE}(3)$ (Dynamic 6-DoF ego-pose updated at 60 Hz)
 
-### 2.2 Dual-Camera Hand Tracking Handover (30 Hz)
+### 2.2 Dual-Camera Hand Tracking Handover & Source Selection (30 Hz)
 To eliminate the narrow FOV ($65^\circ\text{--}75^\circ$) and wrist self-occlusion limits of a smartphone camera strapped to the head:
 1. `aether/processor.py` runs MediaPipe Hands on **both** the laptop webcam (`Outside-In`) and the incoming 15 Hz phone camera stream (`Inside-Out`).
-2. Each 21-joint hand skeleton is transformed into the World Frame and fused via confidence weights derived from MediaPipe visibility and frustum margin distance:
-   $$\mathbf{P}_{\text{world}} = w_{\text{phone}} \left(\mathbf{T}_{\text{phone}\rightarrow\text{world}} \cdot \mathbf{P}_{\text{phone}}\right) + w_{\text{laptop}} \left(\mathbf{T}_{\text{laptop}\rightarrow\text{world}} \cdot \mathbf{P}_{\text{laptop}}\right)$$
-   where $w_{\text{phone}} + w_{\text{laptop}} = 1$.
-3. **Desk Mode:** When near the laptop, wide two-handed chest/desk gestures outside the phone's FOV are captured with $w_{\text{laptop}} \to 1.0$.
-4. **Room-Scale Roaming Mode:** When the user walks away from the desk wearing Google Cardboard, $w_{\text{laptop}} \to 0.0$ and $w_{\text{phone}} \to 1.0$ seamlessly.
-5. **VIO Scale Drift Correction:** Whenever the user enters the laptop webcam's view, `Aether` locks the phone's translational drift against the static laptop coordinate frame.
+2. **Current Implementation Note:** Without an active optical calibration pattern or co-visible ArUco marker, true metric extrinsic fusion between the phone and laptop camera spaces is uncalibrated. Aether performs dynamic source selection:
+   - When the laptop webcam detects hand landmarks, it selects the laptop tracker with high confidence ($w_{\text{laptop}} = 0.95, w_{\text{phone}} = 0.05$).
+   - When roaming away from the desk, the phone camera stream is selected ($w_{\text{phone}} = 0.95, w_{\text{laptop}} = 0.05$).
+   - If neither camera detects landmarks, synthetic landmark telemetry is generated so downstream state machines run reliably offline.
+   - Metric extrinsic Sim(3) co-registration is planned for V2.1.
 
 ---
 
 ## 3. Volumetric Surface Classification & Depth Occlusion (5 Hz + 0.5 Hz)
 
-### 3.1 RANSAC Plane Extraction & Elevation Taxonomy
-`aether/processor.py` back-projects monocular depth maps into 3D point clouds and fits bounding planes via RANSAC, cross-referenced with **Gemini 2.5 Flash** structured 2D/3D semantic bounding boxes:
+### 3.1 Heuristic Plane Estimation & Elevation Taxonomy
+In `aether/processor.py`, `HeuristicPlaneEstimator` establishes default room planes and refines plane elevations dynamically using Canny contour bounding boxes and geometric priors (`source: 'heuristic'`). When multimodal Gemini 2.5 Flash outputs are available, detected bounding boxes are cross-referenced to promote matching planes to `source: 'vlm'`:
 
-| Surface Class | Metric Elevation ($y$) | Normal $\vec{n}$ | AI Pet ("MAYA") Affordance & Physics Behavior |
-| :--- | :--- | :--- | :--- |
-| `FLOOR` | $0.00\text{ m} \pm 0.05\text{ m}$ | $[0, 1, 0]$ | Default walking, running, and landing surface. |
-| `UNDER_BED_SHADOW_ZONE` | Cavity $y \in [0.00\text{ m}, 0.35\text{ m}]$ beneath overhang | $[0, 1, 0]$ | Target zone for `HIDE_UNDER_BED`; triggers low crouch posture + upper plane depth occlusion. |
-| `CHAIR_OR_BED_SURFACE` | $0.40\text{ m} \text{ to } 0.60\text{ m}$ | $[0, 1, 0]$ | Target platform for `CLIMB_CHAIR` and `JUMP_ON_BED` ballistic trajectories. |
-| `DESK_OR_TABLE` | $0.70\text{ m} \text{ to } 0.90\text{ m}$ | $[0, 1, 0]$ | High tabletop platform; acts as an obstacle or high perch. |
-| `VERTICAL_OBSTACLE` | $y \in [0.00\text{ m}, 1.20\text{ m}]$ | $n_y \approx 0$ | Chair backs, bed frames, desk fronts; registered as Three.js depth-write occlusion masks. |
+| Surface Class | Metric Elevation ($y$) | Normal $\vec{n}$ | AI Pet ("MAYA") Affordance & Physics Behavior | Source Tags |
+| :--- | :--- | :--- | :--- | :--- |
+| `FLOOR` | $0.00\text{ m} \pm 0.05\text{ m}$ | $[0, 1, 0]$ | Default walking, running, and landing surface. | `default`, `heuristic` |
+| `UNDER_BED_SHADOW_ZONE` | Cavity $y \in [0.00\text{ m}, 0.35\text{ m}]$ beneath overhang | $[0, 1, 0]$ | Target zone for `HIDE_UNDER_BED`; triggers low crouch posture + upper plane depth occlusion. | `default`, `vlm` |
+| `CHAIR_OR_BED_SURFACE` | $0.40\text{ m} \text{ to } 0.60\text{ m}$ | $[0, 1, 0]$ | Target platform for `CLIMB_CHAIR` and `JUMP_ON_BED` ballistic trajectories. | `default`, `heuristic`, `vlm` |
+| `DESK_OR_TABLE` | $0.70\text{ m} \text{ to } 0.90\text{ m}$ | $[0, 1, 0]$ | High tabletop platform; acts as an obstacle or high perch. | `default`, `heuristic` |
+| `VERTICAL_OBSTACLE` | $y \in [0.00\text{ m}, 1.20\text{ m}]$ | $n_y \approx 0$ | Chair backs, bed frames, desk fronts; registered as Three.js depth-write occlusion masks. | `default`, `vlm` |
 
 ### 3.2 Real-Time Three.js Depth Occlusion (`imager`)
 To make MAYA convincingly hide *under* a physical bed or *behind* a chair without rendering expensive dense meshes on the phone:
@@ -89,15 +88,17 @@ To make MAYA convincingly hide *under* a physical bed or *behind* a chair withou
 ## 4. AI Pet ("MAYA") Physics & Spatial State Machine
 MAYA transitions smoothly between 7 spatial states driven by hand gestures, surface affordances, and voice/dashboard commands:
 
-1. **`IDLE_SCAN`:** Breathes, blinks, and turns head toward the user's 6-DoF Cardboard head position.
-2. **`WALK_ON_SURFACE`:** Moves toward target waypoint $(x, z)$ while clamping foot elevation $y$ to the active supporting plane (`FLOOR`, `CHAIR_OR_BED_SURFACE`, or `DESK_OR_TABLE`). If walking off a plane edge, gravity ($g = 9.81\text{ m/s}^2$) drops MAYA back to `FLOOR`.
+1. **`IDLE_SCAN`:** Breathes, blinks, and turns head toward the user's Cardboard head position.
+2. **`WALK_ON_SURFACE`:** Moves toward target waypoint $(x, z)$ while clamping foot elevation $y$ to the active supporting plane (`FLOOR`, `CHAIR_OR_BED_SURFACE`, or `DESK_OR_TABLE`). If walking off a plane edge, gravity drops MAYA back to `FLOOR`.
 3. **`CLIMB_CHAIR` / `JUMP_ON_BED`:** Triggered when `INDEX_POINT` raycasts onto a `CHAIR_OR_BED_SURFACE` or via semantic command. Solves a parabolic arc:
-   $$y(t) = y_0 + v_{y0} t - \frac{1}{2} g t^2, \quad v_{y0} = \sqrt{2g(y_{\text{peak}} - y_0)}$$
-   with pitch tilt during takeoff and landing compression upon touching the seat/bed plane.
-4. **`HIDE_UNDER_BED` / `HIDE_BEHIND_OBSTACLE`:** Triggered by `TWO_HAND_SHOO` gesture, loud noise, or "hide" command. MAYA sprints to the nearest `UNDER_BED_SHADOW_ZONE` or behind a `VERTICAL_OBSTACLE`, lowers body height by 50%, and peeks out while occluded by the physical bed/chair geometry.
-5. **`FOLLOW_USER` (`PINCH` / `GRAB`):** Tracks the fused 3D hand coordinate or follows 1.0 meter ahead of the user's Cardboard headset trajectory across the room.
-6. **`SIT_STAY` (`FIST`):** Lowers hindquarters onto the current surface plane (whether on the floor, a chair, or the bed).
+   $$y(t) = y_0 + (y_{\text{target}} - y_0)p + 4 h_{\text{peak}} p (1 - p)$$
+   with pitch tilt during ascent and landing compression upon touching the seat/bed plane.
+4. **`HIDE_UNDER_BED` / `HIDE_BEHIND_OBSTACLE`:** Triggered by hide command or gesture. MAYA sprints to the nearest `UNDER_BED_SHADOW_ZONE`, lowers body height by 50%, and peeks out while occluded by physical bed geometry.
+5. **`FOLLOW_USER` (`PINCH`):** Follows 1.0 meter ahead of the user's Cardboard trajectory across the room.
+6. **`SIT_STAY` (`FIST`):** Lowers hindquarters onto the current surface plane.
 7. **`GREET_WAVE` (`OPEN_PALM`):** Raises front paw and displays contextual spatial HUD speech.
+
+**Sequence-Tracked Directive Protocol:** Directives broadcast from Nexus carry a monotonic `directiveSeq`. Both Aether and Imager only apply directives with newer sequence numbers, preventing 30Hz idle frames from overwriting one-shot commands.
 
 ---
 
@@ -111,9 +112,9 @@ MAYA transitions smoothly between 7 spatial states driven by hand gestures, surf
   "mode": "CARDBOARD_STEREO",
   "pose6DoF": {
     "position": { "x": 0.12, "y": 1.58, "z": -0.45 },
-    "quaternion": { "x": 0.01, "y": -0.18, "z": 0.00, "w": 0.98 },
-    "euler": { "alpha": 21.4, "beta": 82.1, "gamma": -1.2 },
-    "trackingSource": "WEBXR_6DOF_OR_VIO"
+    "quaternion": { "qx": 0.01, "qy": -0.18, "qz": 0.00, "qw": 0.98 },
+    "rotation": { "alpha": 21.4, "beta": 82.1, "gamma": -1.2 },
+    "trackingSource": "IMU_VIO_FALLBACK"
   },
   "cvFrameBase64": "<optional_15Hz_640x360_jpeg>",
   "semanticSnapshotBase64": "<optional_0.5Hz_jpeg>"
@@ -128,7 +129,7 @@ MAYA transitions smoothly between 7 spatial states driven by hand gestures, surf
   "dualHandPose": {
     "active": true,
     "gesture": "INDEX_POINT",
-    "weights": { "phone": 0.65, "laptop": 0.35 },
+    "weights": { "phone": 0.05, "laptop": 0.95, "selectedSource": "laptop", "calibrated": false },
     "wristWorld": { "x": 0.15, "y": 1.10, "z": -0.85 },
     "raycastTarget": { "x": 0.80, "y": 0.45, "z": -1.60, "surfaceId": "plane_chair_1" }
   },
@@ -137,7 +138,8 @@ MAYA transitions smoothly between 7 spatial states driven by hand gestures, surf
       "id": "plane_floor_0",
       "class": "FLOOR",
       "center": { "x": 0.0, "y": 0.0, "z": -1.5 },
-      "extents": { "w": 4.0, "d": 4.0, "h": 0.02 }
+      "extents": { "w": 5.0, "d": 5.0, "h": 0.02 },
+      "source": "default"
     },
     {
       "id": "plane_chair_1",
@@ -145,23 +147,16 @@ MAYA transitions smoothly between 7 spatial states driven by hand gestures, surf
       "semanticLabel": "wooden_chair",
       "center": { "x": 0.80, "y": 0.45, "z": -1.60 },
       "extents": { "w": 0.55, "d": 0.55, "h": 0.45 },
-      "occluder": true
-    },
-    {
-      "id": "zone_under_bed_1",
-      "class": "UNDER_BED_SHADOW_ZONE",
-      "semanticLabel": "under_bed",
-      "center": { "x": -1.10, "y": 0.0, "z": -2.10 },
-      "extents": { "w": 1.40, "d": 1.90, "h": 0.32 },
-      "overhangElevation": 0.35,
-      "occluder": true
+      "occluder": true,
+      "source": "heuristic"
     }
   ],
   "petDirective": {
     "state": "CLIMB_CHAIR",
     "targetSurfaceId": "plane_chair_1",
     "targetPosition": { "x": 0.80, "y": 0.45, "z": -1.60 },
-    "speechHud": "Jumping up onto the wooden chair! 🐾🪑"
+    "speechHud": "Jumping up onto the wooden chair! 🐾🪑",
+    "directiveSeq": 42
   }
 }
 ```
@@ -169,7 +164,7 @@ MAYA transitions smoothly between 7 spatial states driven by hand gestures, surf
 ---
 
 ## 6. Gemini 2.5 Flash Structured Scene Graph Schema (`aether/processor.py`)
-In the 0.5 Hz Slow Loop, Aether sends the latest camera snapshot(s) to `gemini-2.5-flash` using `response_mime_type="application/json"` with the following schema:
+In the 0.5 Hz Slow Loop, Aether sends keyframe snapshots to `gemini-2.5-flash` using `response_mime_type="application/json"` with the following schema:
 ```json
 {
   "sceneSummary": "Bedroom workspace with a wooden chair next to a desk and a raised bed frame on the left.",
@@ -192,6 +187,40 @@ In the 0.5 Hz Slow Loop, Aether sends the latest camera snapshot(s) to `gemini-2
   "assistantReply": "MAYA can jump onto the chair on your right or hide underneath the bed on your left."
 }
 ```
+
+---
+
+## 7. Subsystem Implementation Status
+
+| Subsystem / Feature | Status | Implementation Notes |
+| :--- | :--- | :--- |
+| **Google Cardboard Stereo** | Implemented | Dual scissor viewports (`cameraLeft`, `cameraRight`) with 64mm IPD separation and physical center divider. |
+| **WebXR 6-DoF Tracking** | Implemented | Opt-in button (`toggle-webxr-btn`) requesting `immersive-ar` session with `local-floor` space; falls back cleanly to 60Hz IMU. |
+| **IMU Dead Reckoning** | Implemented | 60Hz Euler-to-quaternion integration with gravity subtraction and exponential velocity damping. |
+| **Dual-Camera Hand Tracking** | Implemented | Source selection (laptop webcam preferred when at desk, phone stream when roaming); extrinsic calibration between cameras is uncalibrated. |
+| **Heuristic Plane Estimator** | Implemented | `HeuristicPlaneEstimator` infers 3D planes from geometric priors and Canny contour bounding boxes (`source="heuristic"` / `source="default"`). |
+| **VLM Scene Graph** | Implemented | Gemini 2.5 Flash Structured JSON scene descriptions merged with heuristic planes (`source="vlm"`); offline OpenCV contour fallback. |
+| **Invisible Depth Occluders** | Implemented | Real-world furniture masks rendered with `colorWrite: false, depthWrite: true` (`renderOrder=0`) before pet geometry. |
+| **Pet State Machine** | Implemented | 7 behavioral states with parabolic jumping kinematics and crouch postures; sequence-tracked directives (`directiveSeq`) prevent overwriting. |
+| **3D Spatial Dashboard** | Implemented | PC browser visualizer showing camera frustums, hand landmarks, detected planes, and interactive directive buttons. |
+| **Optical Drift Correction** | Stubbed | `applyDriftCorrection` stub defined in `sensors.js` reserved for future outside-in marker triangulation. |
+| **Extrinsic Sim(3) Fusion** | Planned | Automated visual calibration pattern / ArUco marker locking between phone and laptop cameras planned for V2.1. |
+
+---
+
+## 8. Mobile & Network Troubleshooting Guide
+
+### 8.1 Self-Signed TLS Certificate Warning (Mobile Chrome / Android)
+- When navigating to `https://<PC_LAN_IP>:8443/imager`, Chrome will display *"Your connection is not private"*.
+- Tap **Advanced** → **Proceed to `<PC_LAN_IP>` (unsafe)**. This is mandatory because modern mobile browsers require HTTPS for camera (`getUserMedia`) and device orientation sensors.
+
+### 8.2 iOS Safari Limitations & Workarounds
+- **WSS WebSocket Security:** iOS Safari blocks secure WebSocket (`wss://`) connections to self-signed origins unless the user has visited and explicitly trusted the certificate on port 8443 in Safari first. Always open `https://<PC_LAN_IP>:8443/imager` in Safari directly.
+- **WebXR Device API:** Standard iOS Safari does not natively support the WebXR Device API (`navigator.xr`). On iOS, MAYAwe automatically falls back to 60Hz fused IMU orientation tracking (`DeviceOrientationEvent` / `DeviceMotionEvent`), which runs smoothly in Google Cardboard. True 6-DoF WebXR on iOS requires a WebXR-compatible browser (e.g. WebXR Viewer).
+
+### 8.3 Python & MediaPipe Installation on Python 3.13 / 3.14
+- Official `mediapipe` binary wheels on PyPI support Python 3.9 through 3.12.
+- If using Python 3.13 or 3.14, `pip install mediapipe` may fail. You can install an experimental Tasks wheel, run in a Python 3.11/3.12 virtual environment, or allow Aether to run in autonomous `SYNTHETIC` mode.
 
 ---
 

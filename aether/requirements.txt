@@ -1,5 +1,22 @@
+# ==============================================================================
+# MAYAwe V2 Aether - Python Dependencies
+# ==============================================================================
+# Supported Python versions:
+# - Recommended: Python 3.9 - 3.12 (official binary wheels available for mediapipe)
+# - Note for Python 3.13 / 3.14: Official mediapipe wheels may not be available on PyPI yet.
+#   On 3.13+, install mediapipe via experimental Tasks wheel, build from source,
+#   or run Aether in synthetic fallback mode (SYNTHETIC).
+# ==============================================================================
+
+# Core networking & numerical computation
 websockets>=12.0
 numpy>=1.24.0
+
+# Computer Vision & Real-time Hand Landmark Tracking
 opencv-python>=4.8.0
 mediapipe>=0.10.0
-google-genai>=0.1.0
+
+# Optional: Google GenAI SDK for Gemini 2.5 Flash Structured Scene Graph
+# Only required when GEMINI_API_KEY is configured in your environment.
+# If omitted or offline, Aether uses an integrated OpenCV contour/saliency solver.
+# google-genai>=0.1.0

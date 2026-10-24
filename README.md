@@ -7,8 +7,8 @@
     <img src="https://img.shields.io/badge/Version-MAYAwe_V2.0-blue" alt="Version" />
     <img src="https://img.shields.io/badge/Headset-Google_Cardboard_Stereo-orange" alt="Headset" />
     <img src="https://img.shields.io/badge/Dual_Camera-Inside_Out_+_Outside_In-green" alt="Dual Camera" />
-    <img src="https://img.shields.io/badge/Physics-RANSAC_3D_Planes-purple" alt="Physics" />
-    <img src="https://img.shields.io/badge/Latency-ATW_<15ms-cyan" alt="Latency" />
+    <img src="https://img.shields.io/badge/Physics-Heuristic_3D_Planes-purple" alt="Physics" />
+    <img src="https://img.shields.io/badge/Tracking-60Hz_IMU_+_WebXR-cyan" alt="Tracking" />
   </p>
 </div>
 
@@ -16,7 +16,7 @@
 
 ## 👁️ The MAYAwe V2 Vision
 
-**MAYAwe V2** transforms everyday consumer hardware into a hands-free, room-scale spatial computing ecosystem. By fusing an Inside-Out smartphone camera strapped inside a **Google Cardboard headset** with an Outside-In **laptop webcam** in a shared 3D World Coordinate Frame, your articulated virtual companion (**"MAYA"**) physically inhabits your room:
+**MAYAwe V2** transforms everyday consumer hardware into a hands-free, room-scale spatial computing ecosystem. By pairing an Inside-Out smartphone camera strapped inside a **Google Cardboard headset** with an Outside-In **laptop webcam** in a shared 3D World Coordinate Frame, your articulated virtual companion (**"MAYA"**) physically inhabits your room:
 - **Climbs Chairs & Jumps onto Beds:** Solves parabolic ballistic jump arcs ($y(t) = y_0 + v_{y0}t - \frac{1}{2}gt^2$) onto real detected furniture.
 - **Hides Under the Bed & Behind Desks:** Pathfinds to detected under-bed shadow cavities, crouches low, and utilizes **Invisible Depth-Occlusion Masks** (`colorWrite: false, depthWrite: true`) so real-world furniture physically occludes her 3D body!
 - **Dual-Camera Hand Tracking Handover:** MediaPipe runs on both the laptop webcam (tracking wide two-handed gestures at your desk) and the phone's rear camera (tracking interactions when roaming room-scale in Cardboard).
@@ -29,14 +29,14 @@
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ TIER 1: 📱 MOBILE IMAGER (Smartphone in Google Cardboard Headset)          │
 │ • Stereoscopic Split-Screen WebGL (60 FPS dual scissor viewports)          │
-│ • Asynchronous TimeWarp (ATW) & 6-DoF VIO Pose Tracking (<15ms latency)    │
+│ • Low-Latency Orientation Tracking & 6-DoF VIO Fallback                   │
 │ • Invisible Depth-Occlusion Proxies (Clips MAYA behind real furniture)     │
 │ • 60 Hz IMU Telemetry + 15 Hz Egocentric CV Stream + 0.5 Hz Keyframes      │
 └─────────────────────────────────────┬──────────────────────────────────────┘
                                       │ HTTPS / WSS:8443 (Low-Latency LAN)
                                       ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
-│ TIER 2: 💻 NEXUS ENGINE (Laptop Spatial Broker & 3DGS Dashboard)           │
+│ TIER 2: 💻 NEXUS ENGINE (Laptop Spatial Broker & 3D Dashboard)             │
 │ • Auto-Generated Self-Signed LAN TLS (cert.pem / key.pem)                  │
 │ • Unified Spatial State Broker (phonePose6DoF, dualHandPose, roomPlanes)   │
 │ • Visualizes both camera frustums (T_laptop_to_world, T_phone_to_world)    │
@@ -46,12 +46,30 @@
                                       ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ TIER 3: 🧠 AETHER SPATIAL INTELLIGENCE (Python Multi-Loop Solver)          │
-│ • FAST LOOP (30 Hz): Dual-Camera MediaPipe Hands with Kalman Blending      │
-│ • MEDIUM LOOP (5 Hz): Metric Depth SLAM & RANSAC 3D Furniture Planes       │
+│ • FAST LOOP (30 Hz): Dual-Camera MediaPipe Hands with Source Selection     │
+│ • MEDIUM LOOP (5 Hz): Heuristic Contour & Elevation 3D Furniture Planes    │
 │ • SLOW LOOP (0.5 Hz): Gemini 2.5 Flash Structured JSON Scene Graph         │
 │   (or local OpenCV contour/saliency solver offline)                        │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 📊 Implementation Status
+
+| Subsystem / Feature | Status | Implementation Notes |
+| :--- | :--- | :--- |
+| **Google Cardboard Stereo** | Implemented | Dual WebGL scissor viewports (`cameraLeft`, `cameraRight`) with 64mm IPD separation and physical center divider. |
+| **WebXR 6-DoF Tracking** | Implemented | Opt-in button (`toggle-webxr-btn`) requesting `immersive-ar` session with `local-floor` space; falls back cleanly to 60Hz IMU. |
+| **IMU Dead Reckoning** | Implemented | 60Hz Euler-to-quaternion integration with gravity subtraction and exponential velocity damping. |
+| **Dual-Camera Hand Tracking** | Implemented | Source selection (laptop webcam preferred when at desk, phone stream when roaming); extrinsic calibration between cameras is uncalibrated. |
+| **Heuristic Plane Estimator** | Implemented | `HeuristicPlaneEstimator` infers 3D planes from geometric priors and Canny contour bounding boxes (`source="heuristic"` / `source="default"`). |
+| **VLM Scene Graph** | Implemented | Gemini 2.5 Flash Structured JSON scene descriptions merged with heuristic planes (`source="vlm"`); offline OpenCV contour fallback. |
+| **Invisible Depth Occluders** | Implemented | Real-world furniture masks rendered with `colorWrite: false, depthWrite: true` (`renderOrder=0`) before pet geometry. |
+| **Pet State Machine** | Implemented | 7 behavioral states with parabolic jumping kinematics and crouch postures; sequence-tracked directives (`directiveSeq`) prevent overwriting. |
+| **3D Spatial Dashboard** | Implemented | PC browser visualizer showing camera frustums, hand landmarks, detected planes, and interactive directive buttons. |
+| **Optical Drift Correction** | Stubbed | `applyDriftCorrection` stub defined in `sensors.js` reserved for future outside-in marker triangulation. |
+| **Extrinsic Sim(3) Fusion** | Planned | Automated visual calibration pattern / ArUco marker locking between phone and laptop cameras planned for V2.1. |
 
 ---
 
@@ -73,7 +91,7 @@
 
 ### Prerequisites
 - **Node.js** v18+ (tested on v24.x)
-- **Python** 3.10+ (tested on 3.14.x)
+- **Python** 3.9 - 3.12 recommended for official MediaPipe wheels (3.13+ supported via experimental tasks wheel or synthetic mode)
 - **Smartphone & Laptop** connected to the **same Wi-Fi network**
 - *(Optional)* Google Cardboard headset or phone VR goggles
 
@@ -125,8 +143,9 @@ python processor.py
 1. Open `https://<PC_LAN_IP>:8443/imager` in Chrome or Safari on your phone.
 2. Accept the self-signed certificate (Tap **Advanced** → **Proceed (unsafe)**).
 3. Tap **Start Spatial Experience**.
-4. **Cardboard Mode:** Tap the **"🥽 Cardboard Mode"** button to toggle stereoscopic split-screen mode, slide your phone into your Google Cardboard headset, and look around your room!
+4. **Cardboard Mode:** Tap **"🥽 Cardboard Mode"** to toggle stereoscopic split-screen mode, slide your phone into your Google Cardboard headset, and look around your room!
 5. **Debug Planes:** Tap **"📐 Debug Planes"** to visualize detected floor, chair, bed, and desk colliders.
+6. **WebXR Tracking:** Tap **"📱 WebXR Tracking"** to opt in to native 6-DoF WebXR tracking (on supported Chrome Android devices). If unsupported, the app seamlessly uses 60Hz fused IMU orientation.
 
 ---
 
@@ -140,6 +159,37 @@ Open `https://localhost:8443/dashboard` on your laptop to observe:
 
 ---
 
+## 🧪 Running Automated Tests
+
+Run the full end-to-end test suite (Nexus endpoints, Aether smoke tests, directive flow integration):
+
+```powershell
+cd nexus
+npm test
+```
+
+Or run via the test runner scripts:
+- **Windows:** `.\tests\run_all.bat`
+- **Linux / macOS:** `./tests/run_all.sh`
+
+---
+
+## 🔧 Troubleshooting
+
+### Self-Signed TLS Certificate Warning (Mobile Chrome / Android)
+- When navigating to `https://<PC_LAN_IP>:8443/imager`, mobile Chrome will warn *"Your connection is not private"*.
+- Tap **Advanced** → **Proceed to `<PC_LAN_IP>` (unsafe)**. This one-time step is required because modern mobile browsers require HTTPS for camera (`getUserMedia`) and device orientation sensors.
+
+### iOS Safari Limitations & Workarounds
+- **WSS WebSocket Security:** iOS Safari blocks secure WebSocket (`wss://`) connections to self-signed origins unless the user has visited and trusted the HTTPS certificate on port 8443 in Safari first. Always open `https://<PC_LAN_IP>:8443/imager` in Safari directly.
+- **WebXR Device API:** Standard iOS Safari does not natively support the WebXR Device API (`navigator.xr`). On iOS, MAYAwe automatically falls back to 60Hz fused IMU orientation tracking (`DeviceOrientationEvent` / `DeviceMotionEvent`), which runs smoothly in Google Cardboard. True 6-DoF WebXR on iOS requires a WebXR-compatible browser (e.g. WebXR Viewer).
+
+### Python & MediaPipe Installation on Python 3.13 / 3.14
+- Official `mediapipe` binary wheels on PyPI support Python 3.9 through 3.12.
+- If running Python 3.13 or 3.14, `pip install mediapipe` may fail. You can install an experimental Tasks wheel, run in a Python 3.11/3.12 virtual environment, or allow Aether to run in autonomous `SYNTHETIC` mode.
+
+---
+
 ## 📂 Repository Layout
 
 ```
@@ -148,6 +198,12 @@ MAYAwe/
 ├── BLUEPRINT.md                  # Comprehensive V2 technical specification
 ├── README.md                     # Quick start & documentation
 ├── .gitignore                    # Ignores certificates, dependencies, models
+├── tests/                        # Automated unit, smoke, and integration test suite
+│   ├── test_nexus.js             # Nexus syntax and HTTP/HTTPS /api/status test
+│   ├── test_aether_smoke.py      # Gestures, plane estimators, and component smoke test
+│   ├── test_directive_flow.js    # Sequence-tracked directive integration test
+│   ├── run_all.bat               # Windows batch test runner
+│   └── run_all.sh                # Linux/macOS bash test runner
 ├── nexus/                        # PC Coordinator & Spatial Broker
 │   ├── generate_cert.js          # Self-signed TLS certificate generator for LAN
 │   ├── server.js                 # Unified HTTPS:8443 / WSS spatial broker
@@ -161,7 +217,7 @@ MAYAwe/
 │       └── js/
 │           ├── sensors.js        # 6-DoF VIO, WebXR pose, and IMU dead reckoning
 │           ├── stream.js         # Bidirectional WSS:8443 streaming engine
-│           ├── main.js           # Three.js Cardboard stereo, ATW & furniture physics
+│           ├── main.js           # Three.js Cardboard stereo, pose sync & furniture physics
 │           └── three.min.js      # Offline Three.js library
 └── aether/                       # Spatial AI & SLAM Layer
     ├── processor.py              # Multi-loop engine (30Hz dual-cam, 5Hz planes, 0.5Hz VLM)

@@ -263,9 +263,12 @@ function integrateInertialOdometry(dt) {
 }
 
 /**
- * Correction hook from Nexus (called when external camera triangulates phone position)
+ * Correction hook from Nexus (STUB / UNUSED):
+ * Reserved for future external outside-in camera optical drift correction if laptop camera triangulates phone marker.
+ * Currently not invoked by active tracking pipeline; 6-DoF tracking relies on WebXR or IMU dead-reckoning.
  */
 function applyDriftCorrection(worldPosCorrection) {
+    // Stub: Currently unused. Kept for future outside-in optical triangulation integration.
     if (!worldPosCorrection) return;
     const LERP_SPEED = 0.2;
     if (worldPosCorrection.x !== undefined) sensorState.position.x += (worldPosCorrection.x - sensorState.position.x) * LERP_SPEED;
