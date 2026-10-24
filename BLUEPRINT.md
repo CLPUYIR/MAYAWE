@@ -1,85 +1,142 @@
-# MAYAwe BLUEPRINT: Distributed Immersive Computing Ecosystem
+# MAYAwe BLUEPRINT: Distributed Spatial Computing & AR AI Architecture (v2.0)
 
-## 1. Vision & Mission
-MAYAwe aims to democratize immersive technology (AR/VR/MR) by transforming ordinary consumer hardware—specifically spare smartphones and home PCs—into a modular, scalable, and low-cost distributed computing ecosystem.
+## 1. Vision & Architectural Philosophy
+MAYAwe aims to democratize spatial computing (AR/VR/MR) by transforming ordinary consumer hardware—specifically spare smartphones and home PCs—into a modular, scalable, and low-latency distributed computing ecosystem.
 
-## 2. System Architecture & Hierarchy (Refined)
-The system follows a three-tier **High-Speed Distributed Hierarchy**:
+### Core Tenets:
+1. **Zero-Latency Rendering Principle:** Never stream full camera video to the PC and back for AR rendering (which incurs 100+ ms of motion-to-photon latency, causing severe disorientation). Render the AR overlay locally on the phone at 60 FPS.
+2. **Hybrid Spatial Perception:** Combine **Inside-Out** tracking (phone IMU + camera) with **Outside-In** tracking (laptop webcam tracking user hand gestures in 3D).
+3. **Dual-Loop Vision & AI:**
+   - **Fast Loop (30 Hz):** High-speed local hand landmarking and gestural control via MediaPipe.
+   - **Slow Loop (0.5 Hz):** Asynchronous semantic scene understanding via Gemini 2.5 Flash (or local contour saliency offline).
 
-### Tier 1: MAYAwe Imager & Vision Node (The Senses & Display)
-- **Role:** Dual-view data acquisition and AR Overlay.
-- **Hardware:** 
-    - Primary: Smartphone + Google Cardboard (Display + Spatial Camera 1).
-    - Secondary: Laptop Webcam (Spatial Camera 2).
-- **Function:** 
-    - **Dual-View Capture:** Synchronized streaming of the phone camera and laptop webcam to the Nexus.
-    - **Sensing:** Captures high-frequency sensor telemetry and live feeds.
-    - **AR Overlay:** Renders the AI Pet and virtual artifacts onto the primary phone display.
+---
 
-### Tier 2: Nexus Engine (The Local Coordinator & Stereo Spatial Solver)
-- **Role:** High-speed processing and Vision Hub.
-- **Hardware:** Local PC (connected via high-speed P2P/LAN - similar to Nearby Share speeds).
-- **Function:** 
-    - **Stereo Triangulation:** Compares the two video feeds (Phone vs. Laptop) to calculate 3D spatial points, depth, and user hand positions.
-    - **Sensor Fusion:** Combines IMU data from the phone with the calculated stereo spatial points.
-    - **Local Physics:** Manages the AI Pet's physical interactions based on the solved 3D space.
-    - Bridges the local "Senses" (Imager) with the "Global Intelligence" (Aether Cloud).
+## 2. Distributed System Hierarchy
 
-### Tier 3: Aether Cloud (The Global Intelligence)
-- **Role:** Spatial Awareness & LLM Engine.
-- **Hardware:** High-compute Cloud/Local Cluster (e.g., Hyveyesh).
-- **Function:** 
-    - Runs **Spatial LLMs** and massive vision models for deep environment understanding.
-    - Processes scene data to identify physical objects (tables, tools, instruments).
-    - Orchestrates the **AI Pet**'s behavior and intelligence.
+```
++-------------------------------------------------------------------------+
+|                        TIER 1: MOBILE IMAGER (PHONE)                    |
+|  - Hardware: Consumer Smartphone running modern Chrome or Safari        |
+|  - Senses: Rear camera video stream + 60 Hz IMU (accelerometer/gyro)    |
+|  - Display: Three.js transparent AR canvas overlay over camera feed     |
+|  - Local Actor: Procedural articulated 3D Robot Pet ("MAYA")            |
++-----------------------------------▲-------------------------------------+
+                                    │ Local Wi-Fi (HTTPS / WSS: 8443)
+                                    ▼
++-------------------------------------------------------------------------+
+|                         TIER 2: NEXUS BROKER (PC HUB)                   |
+|  - Hardware: Local Laptop / Desktop PC                                  |
+|  - Security: Dynamic Self-Signed TLS Certificate Generator (cert/key)   |
+|  - Servers: Express HTTPS:8443 (WSS) + HTTP:8080 (WS fallback)          |
+|  - State Broker: Maintains unified spatial state (devices, hands, pet)  |
+|  - Dashboard: Interactive Three.js 3D Spatial Visualizer                |
++-----------------------------------▲-------------------------------------+
+                                    │ Local Bidirectional WebSocket Loop
+                                    ▼
++-------------------------------------------------------------------------+
+|                  TIER 3: AETHER SPATIAL INTELLIGENCE                    |
+|  - Fast Loop (30 Hz): Outside-In Laptop Webcam + MediaPipe Hand Tracker |
+|  - Gestures: OPEN_PALM, INDEX_POINT, PINCH, FIST, WAVE                  |
+|  - Slow Loop (0.5 Hz): Gemini 2.5 Flash / Offline OpenCV Saliency       |
+|  - Sensor Fusion: Shortest-arc angular delta & EMA noise filtering      |
++-------------------------------------------------------------------------+
+```
 
-## 3. The AI Pet Concept: Spatial Awareness & Interaction
-The core of the MAYAwe experience is an **AR/MR AI Pet** that exists within the user's physical space:
-- **Physical Interaction:** The pet understands geometry (floors, tables) and **User Presence**. It can walk toward the user, jump on a table they are pointing at, or react to hand gestures.
-- **Gestural Control:** The user can interact with the pet using natural hand movements (e.g., "come here" gesture, pointing at an object, or petting the AI Pet in 3D space).
-- **Educational Assistance:** The pet acts as an interactive guide. It can point to a specific component and use the 2-camera stereo tracking to verify if the user is looking at or touching the correct part (e.g., "Rotate this exact screw to calibrate the instrument").
-- **Learning Loop:** The user can interact with the pet to teach it about new objects, which the Aether Cloud then processes to update its spatial knowledge base.
+---
 
-## 4. Data Flow Process (DHPA 2.0)
-1.  **Dual-Capture:** Imager (Phone) and Laptop Webcam capture synchronized video + IMU.
-2.  **P2P Stream:** High-speed streaming of both feeds to Nexus using WebRTC/NDI (Nearby Share style protocols).
-3.  **Stereo Solving:** Nexus compares the two images to solve for 3D spatial points and user pose.
-4.  **Cloud Analysis:** Nexus sends key frames and solved 3D points to Aether Cloud for deep semantic understanding.
-5.  **Intelligence Loop:** Aether returns Pet behavior logic based on the user's gestures and environment.
-6.  **Overlay:** Nexus sends final artifact coordinates back to the Imager.
-7.  **AR Render:** The Imager overlays the interactive AI Pet onto the user's vision.
+## 3. Mathematical Foundations & Sensor Fusion
 
-## 5. Telemetry Data Schema (V1)
-To ensure interoperability between different Imagers and Nexus engines, all telemetry must follow this JSON structure:
+### 3.1 DeviceOrientation Euler to Unit Quaternion Transformation
+Mobile browsers deliver `DeviceOrientationEvent` in intrinsic Tait-Bryan Z-X'-Y'' angles:
+- $\alpha \in [0, 360)^\circ$: Azimuth / Yaw (rotation around Z)
+- $\beta \in [-180, 180)^\circ$: Pitch (rotation around X)
+- $\gamma \in [-90, 90)^\circ$: Roll (rotation around Y)
 
+To prevent gimbal lock and discontinuities, angles are transformed on-device into a unit quaternion $\mathbf{q} = (q_x, q_y, q_z, q_w)$:
+Let $\theta_x = \beta / 2$, $\theta_y = \gamma / 2$, $\theta_z = \alpha / 2$.
+Then:
+$$q_x = \sin\theta_x \cos\theta_y \cos\theta_z - \cos\theta_x \sin\theta_y \sin\theta_z$$
+$$q_y = \cos\theta_x \sin\theta_y \cos\theta_z + \sin\theta_x \cos\theta_y \sin\theta_z$$
+$$q_z = \cos\theta_x \cos\theta_y \sin\theta_z - \sin\theta_x \sin\theta_y \cos\theta_z$$
+$$q_w = \cos\theta_x \cos\theta_y \cos\theta_z + \sin\theta_x \sin\theta_y \sin\theta_z$$
+
+Normalized such that $\|\mathbf{q}\| = 1$.
+
+### 3.2 Shortest-Arc Angular Delta (Eliminating 0°/360° Wrap Spikes)
+Raw subtractions like $|\alpha_t - \alpha_{t-1}|$ produce false $350^\circ+$ motion spikes when crossing north ($0^\circ / 360^\circ$). The shortest angular difference is calculated as:
+$$\Delta\theta = |((\theta_t - \theta_{t-1} + 180^\circ) \pmod{360^\circ}) - 180^\circ|$$
+
+### 3.3 Exponential Moving Average (EMA) Filter
+Raw accelerometer readings contain significant high-frequency vibration noise. An EMA filter is applied to smooth vectors $\mathbf{v}$:
+$$\mathbf{s}_t = \alpha \mathbf{v}_t + (1 - \alpha) \mathbf{s}_{t-1}$$
+where $\alpha = 0.25$ for acceleration and $\alpha = 0.35$ for orientation smoothing.
+
+---
+
+## 4. Telemetry & Messaging Schemas
+
+### 4.1 Synchronized Telemetry Packet (Imager -> Nexus -> Aether/Dashboard at 60 Hz)
 ```json
 {
   "type": "telemetry",
-  "deviceId": "string",
-  "timestamp": 123456789,
+  "deviceId": "phone_7a9f2b",
+  "timestamp": 1729774800000,
   "data": {
-    "rotation": {
-      "alpha": 0.0,
-      "beta": 0.0,
-      "gamma": 0.0
-    },
-    "acceleration": {
-      "x": 0.0,
-      "y": 0.0,
-      "z": 0.0
-    },
+    "rotation": { "alpha": 182.4, "beta": 12.5, "gamma": -4.2 },
+    "quaternion": { "qx": 0.082, "qy": -0.024, "qz": 0.995, "qw": 0.041 },
+    "acceleration": { "x": 0.12, "y": 9.81, "z": -0.45 },
     "interval": 16.67
   }
 }
 ```
 
-## 6. Directory Structure
-- `/imager/`: Mobile sensing node code (Web-based prototype).
-- `/nexus/`: PC rendering engine and coordinator logic.
-- `/aether/`: AI intelligence and cloud orchestration layer.
-- `/docs/`: Research papers, patents, and technical documentation.
+### 4.2 Camera Keyframe Packet (Imager -> Nexus -> Aether at 0.5 Hz)
+```json
+{
+  "type": "camera_keyframe",
+  "deviceId": "phone_7a9f2b",
+  "timestamp": 1729774800000,
+  "jpegBase64": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+}
+```
 
-## 7. Engineering Philosophy
-- **Modularity:** Every component should be replaceable (e.g., swap Web Imager for a Native Android Imager).
-- **Low-Cost:** Prioritize existing hardware over specialized proprietary sensors.
-- **Distributed:** Shift heavy compute (Rendering/AI) to powerful nodes while keeping sensing lightweight.
+### 4.3 Spatial State Packet (Aether -> Nexus -> Imager/Dashboard at 30 Hz)
+```json
+{
+  "type": "spatial_state",
+  "source": "aether",
+  "timestamp": 1729774800000,
+  "handPose": {
+    "landmarks": [
+      { "x": 0.48, "y": 0.62, "z": -0.10 }
+    ],
+    "handedness": "Right",
+    "confidence": 0.95
+  },
+  "gesture": "INDEX_POINT",
+  "petState": {
+    "mode": "WALK",
+    "position": { "x": 0.15, "y": -0.15, "z": -1.35 },
+    "targetPosition": { "x": 0.42, "y": -0.15, "z": -1.20 },
+    "speechText": "Moving to indicated target! 🎯"
+  },
+  "speech": "Moving to indicated target! 🎯"
+}
+```
+
+---
+
+## 5. Security & Browser Reality Compliance
+To satisfy modern browser security models:
+1. **HTTPS and WSS Enforcement:** Mobile Web APIs (`navigator.mediaDevices.getUserMedia`, `DeviceOrientationEvent`, and `DeviceMotionEvent`) are strictly disabled over plain HTTP unless on `localhost`. Nexus solves this by dynamically creating an in-memory/cached self-signed TLS certificate matching the host's actual LAN IP address.
+2. **User Gesture Activation:** All audio/video capture and sensor streams must be initiated via an explicit touch/click event on the mobile display (`Start Spatial AR Experience` button).
+3. **Accepting Self-Signed Certificates on Mobile:**
+   - Chrome for Android: Tap **Advanced** -> **Proceed to 192.168.x.x (unsafe)**.
+   - Safari for iOS: Tap **Show Details** -> **visit this website**.
+
+---
+
+<div align="center">
+  <i>MAYAwe Technical Specification &bull; Distributed Spatial Systems</i>
+</div>

@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAYAwe - PC 3D Spatial Dashboard</title>
+    <style>
+        :root {
+            --bg-dark: #07090e;
+            --panel-bg: rgba(13, 19, 33, 0.82);
+            --panel-border: rgba(0, 240, 255, 0.25);
+            --cyan: #00f0ff;
+            --blue: #0072ff;
+            --accent-green: #00ff88;
+            --accent-orange: #ff9f43;
+            --accent-red: #ff4757;
+            --text-main: #f0f6fc;
+            --text-muted: #8b9bb4;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-dark);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            color: var(--text-main);
+        }
+
+        /* 3D WebGL Canvas */
+        #viewport {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        /* Top HUD Bar */
+        #topbar {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            right: 16px;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-radius: 14px;
+            padding: 10px 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            font-size: 20px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--cyan), var(--blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 1px;
+        }
+
+        .brand-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .metrics-strip {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .metric-item {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+
+        .metric-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-val {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--cyan);
+            font-family: monospace;
+        }
+
+        /* Floating Overlay Panels */
+        .panel {
+            position: absolute;
+            z-index: 10;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            color: var(--text-main);
+            overflow-y: auto;
+            max-height: calc(100vh - 120px);
+        }
+
+        #left-panel {
+            top: 76px;
+            left: 16px;
+            width: 320px;
+        }
+
+        #right-panel {
+            top: 76px;
+            right: 16px;
+            width: 330px;
+        }
+
+        .panel-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--cyan);
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.15);
+            padding-bottom: 6px;
+        }
+
+        .card {
+            background: rgba(20, 29, 48, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #d1dff6;
+        }
+
+        .badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 12px;
+            text-transform: uppercase;
+        }
+
+        .badge.online { background: rgba(0, 255, 136, 0.15); color: var(--accent-green); border: 1px solid var(--accent-green); }
+        .badge.offline { background: rgba(255, 71, 87, 0.15); color: var(--accent-red); border: 1px solid var(--accent-red); }
+        .badge.active { background: rgba(0, 240, 255, 0.2); color: var(--cyan); border: 1px solid var(--cyan); }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px 12px;
+            font-size: 11px;
+        }
+
+        .stat-label { color: var(--text-muted); }
+        .stat-value { font-family: monospace; font-weight: 600; text-align: right; color: #ffffff; }
+
+        /* Camera Keyframe Stream Card */
+        #keyframe-preview-img {
+            width: 100%;
+            height: 160px;
+            object-fit: cover;
+            border-radius: 8px;
+            background: #000;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            margin-top: 6px;
+        }
+
+        /* Interactive Control Buttons */
+        .btn-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .ctrl-btn {
+            background: rgba(20, 35, 60, 0.7);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            color: #ffffff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .ctrl-btn:hover {
+            background: rgba(0, 240, 255, 0.25);
+            border-color: var(--cyan);
+            transform: translateY(-1px);
+        }
+
+        .ctrl-btn:active {
+            transform: translateY(1px);
+        }
+
+        /* Orbit Instructions Hint */
+        #hint {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            background: rgba(10, 15, 25, 0.7);
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 11px;
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- 3D Canvas -->
+    <div id="viewport"></div>
+
+    <!-- Top Navigation & Global Metrics -->
+    <div id="topbar">
+        <div class="brand">
+            <span class="brand-logo">MAYAwe</span>
+            <div>
+                <div style="font-weight:700; font-size:13px;">Spatial Broker Dashboard</div>
+                <div class="brand-sub">Distributed Perception Engine</div>
+            </div>
+        </div>
+
+        <div class="metrics-strip">
+            <div class="metric-item">
+                <span class="metric-label">Telemetry Rate</span>
+                <span class="metric-val" id="metric-telemetry-fps">0 Hz</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Active Nodes</span>
+                <span class="metric-val" id="metric-node-count">0</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Active Gesture</span>
+                <span class="metric-val" id="metric-gesture">NONE</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Left Panel: Connected Nodes & Telemetry Details -->
+    <div class="panel" id="left-panel">
+        <div class="panel-title">
+            <span>Spatial Nodes</span>
+            <span id="overall-status-badge" class="badge online">BROKER ACTIVE</span>
+        </div>
+
+        <!-- Phone Imager Node -->
+        <div class="card">
+            <div class="card-header">
+                <span>📱 Mobile Imager</span>
+                <span id="imager-badge" class="badge offline">DISCONNECTED</span>
+            </div>
+            <div class="stat-grid">
+                <span class="stat-label">Device ID</span>
+                <span class="stat-value" id="phone-id">None</span>
+                <span class="stat-label">Orientation (Yaw)</span>
+                <span class="stat-value" id="phone-alpha">0.0°</span>
+                <span class="stat-label">Orientation (Pitch)</span>
+                <span class="stat-value" id="phone-beta">0.0°</span>
+                <span class="stat-label">Orientation (Roll)</span>
+                <span class="stat-value" id="phone-gamma">0.0°</span>
+                <span class="stat-label">Quaternion (w)</span>
+                <span class="stat-value" id="phone-qw">1.000</span>
+                <span class="stat-label">Accel (X, Y, Z)</span>
+                <span class="stat-value" id="phone-accel">0, 0, 0</span>
+            </div>
+        </div>
+
+        <!-- Outside-In Hand Tracker (Aether) -->
+        <div class="card">
+            <div class="card-header">
+                <span>🖐 Aether Hand Tracker</span>
+                <span id="aether-badge" class="badge offline">OFFLINE</span>
+            </div>
+            <div class="stat-grid">
+                <span class="stat-label">Tracked Landmarks</span>
+                <span class="stat-value" id="hand-points-count">0 / 21</span>
+                <span class="stat-label">Handedness</span>
+                <span class="stat-value" id="hand-side">None</span>
+                <span class="stat-label">Classified Gesture</span>
+                <span class="stat-value" id="hand-gesture">NONE</span>
+                <span class="stat-label">Index Tip Point</span>
+                <span class="stat-value" id="hand-index-tip">-</span>
+            </div>
+        </div>
+
+        <!-- AI Pet State Card -->
+        <div class="card">
+            <div class="card-header">
+                <span>🐾 3D AI Pet ("MAYA")</span>
+                <span id="pet-mode-tag" class="badge active">IDLE</span>
+            </div>
+            <div class="stat-grid">
+                <span class="stat-label">Current 3D Pos</span>
+                <span class="stat-value" id="pet-pos-txt">0, 0, -1.5</span>
+                <span class="stat-label">Target Waypoint</span>
+                <span class="stat-value" id="pet-target-txt">0, 0, -1.5</span>
+                <span class="stat-label">Speech Status</span>
+                <span class="stat-value" id="pet-speech-txt" style="grid-column: 1 / -1; text-align: left; margin-top: 4px; color: var(--cyan); font-size: 11px;">Listening...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel: Camera Feed & Testing Dispatcher -->
+    <div class="panel" id="right-panel">
+        <div class="panel-title">
+            <span>Perception Feed</span>
+            <span class="badge active">0.5 Hz KEYFRAME</span>
+        </div>
+
+        <!-- Live Keyframe Snapshot -->
+        <div class="card">
+            <div class="card-header">
+                <span>Phone Camera View</span>
+                <span id="keyframe-time" style="font-size: 10px; color: var(--text-muted);">Waiting...</span>
+            </div>
+            <img id="keyframe-preview-img" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='240' viewBox='0 0 320 240'><rect width='320' height='240' fill='%230b111e'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23556b8d' font-size='13'>Phone Keyframe Waiting...</text></svg>" alt="Keyframe Feed">
+            <div id="semantic-vision-note" style="margin-top: 8px; font-size: 11px; color: var(--text-muted); line-height: 1.3;">
+                Semantic Scene: Awaiting keyframe packets from Imager.
+            </div>
+        </div>
+
+        <!-- Testing & Simulation Dispatcher -->
+        <div class="card">
+            <div class="card-header">
+                <span>🎮 Spatial Command Injector</span>
+            </div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">Trigger gestures & waypoints to test Pet reaction across all nodes:</p>
+            <div class="btn-grid">
+                <button class="ctrl-btn" onclick="injectGesture('WAVE', 'Waving hello! 👋')">👋 Wave</button>
+                <button class="ctrl-btn" onclick="injectGesture('INDEX_POINT', 'Moving to desk point! 🎯')">👉 Point</button>
+                <button class="ctrl-btn" onclick="injectGesture('PINCH', 'Approaching user hand... 🤏')">🤏 Follow Hand</button>
+                <button class="ctrl-btn" onclick="injectGesture('FIST', 'Sitting down obediently. ✊')">✊ Stay / Sit</button>
+                <button class="ctrl-btn" style="grid-column: 1 / -1;" onclick="injectGesture('JUMP', 'Excited leap! 🚀')">🚀 High Jump</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="hint">Left Click + Drag: Orbit Scene &bull; Right Click + Drag: Pan &bull; Wheel: Zoom</div>
+
+    <!-- Vendored Three.js for local/offline support -->
+    <script src="js/three.min.js"></script>
+    <script>
+        // MAYAwe PC 3D Spatial Dashboard
+        (function() {
+            // Three.js Scene Setup
+            const container = document.getElementById('viewport');
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x060911);
+            scene.fog = new THREE.FogExp2(0x060911, 0.08);
+
+            const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 100);
+            camera.position.set(0, 2.5, 4.2);
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambient);
+
+            const dirLight = new THREE.DirectionalLight(0x00f0ff, 1.2);
+            dirLight.position.set(5, 10, 7);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            const purpleLight = new THREE.PointLight(0xa55eea, 1.5, 20);
+            purpleLight.position.set(-5, 4, -3);
+            scene.add(purpleLight);
+
+            // Spatial Grid
+            const grid = new THREE.GridHelper(12, 24, 0x00f0ff, 0x1a2942);
+            grid.position.y = -0.5;
+            scene.add(grid);
+
+            // Simple Orbit Controller (drag to rotate, wheel to zoom)
+            let isDragging = false;
+            let isPanning = false;
+            let prevMouseX = 0;
+            let prevMouseY = 0;
+            let spherical = { radius: 5.5, theta: 0, phi: Math.PI / 3.5 };
+            const targetCenter = new THREE.Vector3(0, 0, -0.5);
+
+            function updateCameraPos() {
+                spherical.phi = Math.max(0.05, Math.min(Math.PI / 2.05, spherical.phi));
+                camera.position.x = targetCenter.x + spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta);
+                camera.position.y = targetCenter.y + spherical.radius * Math.cos(spherical.phi);
+                camera.position.z = targetCenter.z + spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta);
+                camera.lookAt(targetCenter);
+            }
+            updateCameraPos();
+
+            window.addEventListener('mousedown', (e) => {
+                if (e.target.closest('.panel') || e.target.closest('#topbar')) return;
+                if (e.button === 0) isDragging = true;
+                if (e.button === 2) isPanning = true;
+                prevMouseX = e.clientX;
+                prevMouseY = e.clientY;
+            });
+            window.addEventListener('mouseup', () => { isDragging = false; isPanning = false; });
+            window.addEventListener('contextmenu', e => e.preventDefault());
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging && !isPanning) return;
+                const dx = e.clientX - prevMouseX;
+                const dy = e.clientY - prevMouseY;
+                prevMouseX = e.clientX;
+                prevMouseY = e.clientY;
+
+                if (isDragging) {
+                    spherical.theta -= dx * 0.006;
+                    spherical.phi -= dy * 0.006;
+                    updateCameraPos();
+                } else if (isPanning) {
+                    const factor = 0.004 * spherical.radius;
+                    targetCenter.x -= dx * factor;
+                    targetCenter.y += dy * factor;
+                    updateCameraPos();
+                }
+            });
+            window.addEventListener('wheel', (e) => {
+                spherical.radius = Math.max(1.5, Math.min(25, spherical.radius + e.deltaY * 0.005));
+                updateCameraPos();
+            });
+
+            // 1. Build 3D Phone Model
+            const phoneGroup = new THREE.Group();
+            phoneGroup.position.set(-1.2, 0.4, 0);
+
+            // Phone Body
+            const phoneGeo = new THREE.BoxGeometry(0.35, 0.72, 0.04);
+            const phoneMat = new THREE.MeshStandardMaterial({ color: 0x161b22, metalness: 0.8, roughness: 0.2 });
+            const phoneMesh = new THREE.Mesh(phoneGeo, phoneMat);
+            phoneGroup.add(phoneMesh);
+
+            // Glowing Screen
+            const screenGeo = new THREE.PlaneGeometry(0.32, 0.68);
+            const screenMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+            const screenMesh = new THREE.Mesh(screenGeo, screenMat);
+            screenMesh.position.z = 0.021;
+            phoneGroup.add(screenMesh);
+
+            // Orientation Axes Indicator
+            const axesHelper = new THREE.AxesHelper(0.3);
+            phoneGroup.add(axesHelper);
+            scene.add(phoneGroup);
+
+            // 2. Build 3D Hand Skeleton Model (21 landmarks)
+            const handGroup = new THREE.Group();
+            handGroup.position.set(1.2, 0.4, 0);
+            const jointSpheres = [];
+            const jointGeo = new THREE.SphereGeometry(0.025, 12, 12);
+            const jointMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x00ff88, emissiveIntensity: 0.5 });
+            
+            for (let i = 0; i < 21; i++) {
+                const sp = new THREE.Mesh(jointGeo, jointMat);
+                sp.visible = false;
+                handGroup.add(sp);
+                jointSpheres.push(sp);
+            }
+
+            // Bone lines connecting joints
+            const BONE_CONNECTIONS = [
+                [0,1],[1,2],[2,3],[3,4], // Thumb
+                [0,5],[5,6],[6,7],[7,8], // Index
+                [5,9],[9,10],[10,11],[11,12], // Middle
+                [9,13],[13,14],[14,15],[15,16], // Ring
+                [13,17],[17,18],[18,19],[19,20],[0,17] // Pinky & Palm
+            ];
+
+            const boneLines = [];
+            const lineMat = new THREE.LineBasicMaterial({ color: 0x00f0ff, linewidth: 2 });
+            BONE_CONNECTIONS.forEach(() => {
+                const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+                const line = new THREE.Line(geo, lineMat);
+                line.visible = false;
+                handGroup.add(line);
+                boneLines.push(line);
+            });
+
+            // Pointing Laser Ray
+            const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+            const laserMat = new THREE.LineBasicMaterial({ color: 0xff0055, linewidth: 3 });
+            const pointingLaser = new THREE.Line(laserGeo, laserMat);
+            pointingLaser.visible = false;
+            handGroup.add(pointingLaser);
+
+            scene.add(handGroup);
+
+            // 3. Build 3D AI Pet Model in Dashboard View
+            const petGroup = new THREE.Group();
+            petGroup.position.set(0, 0, -1.5);
+
+            const petBody = new THREE.Mesh(
+                new THREE.SphereGeometry(0.2, 24, 20),
+                new THREE.MeshStandardMaterial({ color: 0x223249, metalness: 0.8, roughness: 0.2 })
+            );
+            petBody.scale.set(1.0, 0.85, 1.2);
+            petGroup.add(petBody);
+
+            const petVisor = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.12, 0.12, 0.04, 24),
+                new THREE.MeshBasicMaterial({ color: 0x00f0ff })
+            );
+            petVisor.rotateX(Math.PI / 2);
+            petVisor.position.set(0, 0.05, 0.22);
+            petGroup.add(petVisor);
+
+            // Ground Target Waypoint Marker
+            const waypointMarker = new THREE.Mesh(
+                new THREE.RingGeometry(0.1, 0.22, 24),
+                new THREE.MeshBasicMaterial({ color: 0xff9f43, side: THREE.DoubleSide })
+            );
+            waypointMarker.rotateX(-Math.PI / 2);
+            waypointMarker.position.set(0, -0.48, -1.5);
+            scene.add(waypointMarker);
+
+            scene.add(petGroup);
+
+            // Telemetry & WebSocket Logic
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${proto}//${window.location.host}`;
+            let socket = null;
+
+            function connectWs() {
+                socket = new WebSocket(wsUrl);
+
+                socket.onopen = () => {
+                    console.log("[Dashboard] Connected to Nexus broker");
+                    socket.send(JSON.stringify({
+                        type: 'register',
+                        role: 'dashboard'
+                    }));
+                };
+
+                socket.onmessage = (event) => {
+                    try {
+                        const packet = JSON.parse(event.data);
+                        handleIncomingPacket(packet);
+                    } catch (e) {
+                        console.warn("[Dashboard] Parse error:", e);
+                    }
+                };
+
+                socket.onclose = () => {
+                    setTimeout(connectWs, 2000);
+                };
+            }
+
+            let telemetryPacketsInWindow = 0;
+            setInterval(() => {
+                document.getElementById('metric-telemetry-fps').innerText = `${telemetryPacketsInWindow} Hz`;
+                telemetryPacketsInWindow = 0;
+            }, 1000);
+
+            function handleIncomingPacket(packet) {
+                switch (packet.type) {
+                    case 'spatial_state_snapshot':
+                        applyFullSnapshot(packet.state);
+                        break;
+
+                    case 'telemetry':
+                        telemetryPacketsInWindow++;
+                        updateImagerTelemetry(packet);
+                        break;
+
+                    case 'camera_keyframe':
+                        updateCameraKeyframe(packet);
+                        break;
+
+                    case 'spatial_state':
+                        updateSpatialState(packet);
+                        break;
+                }
+            }
+
+            function applyFullSnapshot(state) {
+                if (!state) return;
+                if (state.petState) {
+                    document.getElementById('pet-mode-tag').innerText = state.petState.mode || 'IDLE';
+                    if (state.petState.position) {
+                        petGroup.position.set(state.petState.position.x, state.petState.position.y, state.petState.position.z);
+                    }
+                    if (state.petState.targetPosition) {
+                        waypointMarker.position.set(state.petState.targetPosition.x, -0.48, state.petState.targetPosition.z);
+                    }
+                    if (state.petState.speechText) {
+                        document.getElementById('pet-speech-txt').innerText = state.petState.speechText;
+                    }
+                }
+            }
+
+            function updateImagerTelemetry(packet) {
+                document.getElementById('imager-badge').className = "badge online";
+                document.getElementById('imager-badge').innerText = "STREAMING";
+                document.getElementById('phone-id').innerText = packet.deviceId || 'Phone';
+
+                const rot = packet.data?.rotation;
+                if (rot) {
+                    document.getElementById('phone-alpha').innerText = `${(rot.alpha || 0).toFixed(1)}°`;
+                    document.getElementById('phone-beta').innerText = `${(rot.beta || 0).toFixed(1)}°`;
+                    document.getElementById('phone-gamma').innerText = `${(rot.gamma || 0).toFixed(1)}°`;
+                }
+
+                const q = packet.data?.quaternion;
+                if (q) {
+                    document.getElementById('phone-qw').innerText = (q.qw || 1).toFixed(3);
+                    // Rotate the 3D phone model in real-time
+                    phoneGroup.quaternion.set(q.qx, q.qy, q.qz, q.qw);
+                }
+
+                const acc = packet.data?.acceleration;
+                if (acc) {
+                    document.getElementById('phone-accel').innerText = `${(acc.x||0).toFixed(1)}, ${(acc.y||0).toFixed(1)}, ${(acc.z||0).toFixed(1)}`;
+                }
+            }
+
+            function updateCameraKeyframe(packet) {
+                if (packet.jpegBase64) {
+                    document.getElementById('keyframe-preview-img').src = packet.jpegBase64;
+                    document.getElementById('keyframe-time').innerText = new Date(packet.timestamp || Date.now()).toLocaleTimeString();
+                }
+            }
+
+            function updateSpatialState(packet) {
+                document.getElementById('aether-badge').className = "badge online";
+                document.getElementById('aether-badge').innerText = "TRACKING";
+
+                if (packet.gesture) {
+                    document.getElementById('metric-gesture').innerText = packet.gesture;
+                    document.getElementById('hand-gesture').innerText = packet.gesture;
+                }
+
+                if (packet.petState) {
+                    const ps = packet.petState;
+                    if (ps.mode) document.getElementById('pet-mode-tag').innerText = ps.mode;
+                    if (ps.position) {
+                        petGroup.position.set(ps.position.x, ps.position.y, ps.position.z);
+                        document.getElementById('pet-pos-txt').innerText = `${ps.position.x.toFixed(2)}, ${ps.position.y.toFixed(2)}, ${ps.position.z.toFixed(2)}`;
+                    }
+                    if (ps.targetPosition) {
+                        waypointMarker.position.set(ps.targetPosition.x, -0.48, ps.targetPosition.z);
+                        document.getElementById('pet-target-txt').innerText = `${ps.targetPosition.x.toFixed(2)}, ${ps.targetPosition.y.toFixed(2)}, ${ps.targetPosition.z.toFixed(2)}`;
+                    }
+                }
+
+                if (packet.speech) {
+                    document.getElementById('pet-speech-txt').innerText = packet.speech;
+                }
+
+                // Render 3D Hand Landmarks
+                if (packet.handPose && packet.handPose.landmarks) {
+                    const lms = packet.handPose.landmarks;
+                    document.getElementById('hand-points-count').innerText = `${lms.length} / 21`;
+                    document.getElementById('hand-side').innerText = packet.handPose.handedness || "Right";
+
+                    const scale = 1.6;
+                    lms.forEach((pt, i) => {
+                        if (jointSpheres[i]) {
+                            // MediaPipe coords: x [0, 1] left->right, y [0, 1] top->down, z normalized depth
+                            jointSpheres[i].position.set(
+                                (pt.x - 0.5) * scale,
+                                -(pt.y - 0.5) * scale,
+                                -pt.z * scale
+                            );
+                            jointSpheres[i].visible = true;
+                        }
+                    });
+
+                    // Update bone lines
+                    BONE_CONNECTIONS.forEach((pair, idx) => {
+                        const line = boneLines[idx];
+                        if (line && jointSpheres[pair[0]] && jointSpheres[pair[1]]) {
+                            const p1 = jointSpheres[pair[0]].position;
+                            const p2 = jointSpheres[pair[1]].position;
+                            const posAttr = line.geometry.attributes.position;
+                            posAttr.setXYZ(0, p1.x, p1.y, p1.z);
+                            posAttr.setXYZ(1, p2.x, p2.y, p2.z);
+                            posAttr.needsUpdate = true;
+                            line.visible = true;
+                        }
+                    });
+
+                    // Index Pointing Laser
+                    if (packet.gesture === 'INDEX_POINT' && jointSpheres[8] && jointSpheres[5]) {
+                        const tip = jointSpheres[8].position;
+                        const knuckle = jointSpheres[5].position;
+                        const dir = new THREE.Vector3().subVectors(tip, knuckle).normalize();
+                        const endPoint = new THREE.Vector3().copy(tip).addScaledVector(dir, 3.0);
+
+                        const posAttr = pointingLaser.geometry.attributes.position;
+                        posAttr.setXYZ(0, tip.x, tip.y, tip.z);
+                        posAttr.setXYZ(1, endPoint.x, endPoint.y, endPoint.z);
+                        posAttr.needsUpdate = true;
+                        pointingLaser.visible = true;
+
+                        document.getElementById('hand-index-tip').innerText = `${tip.x.toFixed(2)}, ${tip.y.toFixed(2)}`;
+                    } else {
+                        pointingLaser.visible = false;
+                    }
+                }
+            }
+
+            // Command Injection
+            window.injectGesture = function(gesture, speech) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    const cmd = {
+                        type: 'dashboard_command',
+                        gesture: gesture,
+                        speech: speech,
+                        petState: {
+                            mode: gesture === 'INDEX_POINT' ? 'WALK' : gesture,
+                            targetPosition: { x: (Math.random() - 0.5) * 1.5, y: -0.15, z: -1.2 - Math.random() * 0.8 }
+                        }
+                    };
+                    socket.send(JSON.stringify(cmd));
+                }
+            };
+
+            // Main Animation Render Loop
+            function animate() {
+                requestAnimationFrame(animate);
+                renderer.render(scene, camera);
+            }
+            animate();
+
+            // Resize Handler
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            connectWs();
+        })();
+    </script>
+</body>
+</html>

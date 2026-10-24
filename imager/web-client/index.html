@@ -2,19 +2,305 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MAYAwe Imager - Web Node</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>MAYAwe Imager - AR AI Pet Node</title>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #111; color: white; }
-        #status { font-size: 1.2rem; margin-bottom: 20px; }
-        .btn { padding: 10px 20px; background: #007bff; border: none; color: white; border-radius: 5px; cursor: pointer; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050508;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #ffffff;
+        }
+
+        /* Camera Feed Background */
+        #camera-feed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: 1;
+            transform: scaleX(1); /* Rear camera standard */
+        }
+
+        /* Transparent Three.js AR Canvas */
+        #ar-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* AR HUD Overlay */
+        #ar-hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 16px;
+            pointer-events: none;
+        }
+
+        .hud-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        .badge-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .hud-pill {
+            background: rgba(10, 15, 30, 0.75);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff4757;
+            box-shadow: 0 0 8px #ff4757;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background: #00ff88;
+            box-shadow: 0 0 10px #00ff88;
+        }
+
+        /* Pet Speech & Semantic Guidance Bubble */
+        .hud-speech-container {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            margin-top: 10px;
+        }
+
+        .speech-bubble {
+            background: rgba(13, 22, 42, 0.88);
+            border: 1.5px solid #00f0ff;
+            border-radius: 18px;
+            padding: 12px 18px;
+            max-width: 90%;
+            color: #e0f7ff;
+            font-size: 14px;
+            line-height: 1.4;
+            box-shadow: 0 8px 32px rgba(0, 240, 255, 0.25), inset 0 0 12px rgba(0, 240, 255, 0.15);
+            animation: pulseGlow 3s infinite alternate;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        @keyframes pulseGlow {
+            0% { border-color: rgba(0, 240, 255, 0.4); }
+            100% { border-color: rgba(0, 240, 255, 0.95); }
+        }
+
+        .speech-header {
+            font-size: 11px;
+            color: #00f0ff;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Bottom Controls */
+        .hud-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            width: 100%;
+            pointer-events: auto;
+        }
+
+        .hud-btn {
+            background: linear-gradient(135deg, rgba(0, 180, 255, 0.8), rgba(0, 100, 255, 0.85));
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(0, 150, 255, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            touch-action: manipulation;
+        }
+
+        .hud-btn:active {
+            transform: scale(0.96);
+            background: linear-gradient(135deg, rgba(0, 150, 220, 0.9), rgba(0, 80, 220, 0.95));
+        }
+
+        .hud-btn.secondary {
+            background: rgba(30, 40, 60, 0.85);
+            border: 1px solid rgba(0, 240, 255, 0.4);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Initial Setup Overlay */
+        #permission-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at center, #141b2d 0%, #060911 100%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 30px;
+            text-align: center;
+            pointer-events: auto;
+        }
+
+        #permission-modal h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #00f0ff, #70a6ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        #permission-modal p {
+            color: #9cb3d5;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 24px;
+            max-width: 380px;
+        }
+
+        .start-btn {
+            background: linear-gradient(135deg, #00f0ff, #0072ff);
+            border: none;
+            color: #030e1d;
+            font-weight: 800;
+            font-size: 17px;
+            padding: 16px 36px;
+            border-radius: 35px;
+            cursor: pointer;
+            box-shadow: 0 6px 25px rgba(0, 240, 255, 0.5);
+            letter-spacing: 0.5px;
+        }
+
+        .start-btn:active {
+            transform: scale(0.97);
+        }
+
+        .perm-status {
+            margin-top: 18px;
+            font-size: 13px;
+            color: #ff9f43;
+        }
+
+        /* Hidden canvas for capturing low-frequency 0.5Hz keyframes */
+        #keyframe-canvas {
+            display: none;
+        }
     </style>
 </head>
 <body>
-    <h1>MAYAwe Imager</h1>
-    <div id="status">Status: Waiting for sensors...</div>
-    <button id="start" class="btn">Start Sensing</button>
+    <!-- Live Background Rear Camera Feed -->
+    <video id="camera-feed" autoplay playsinline muted></video>
 
+    <!-- Transparent 3D AR Overlay Canvas -->
+    <canvas id="ar-canvas"></canvas>
+
+    <!-- Hidden canvas for 0.5Hz JPEG snapshot streaming to Aether -->
+    <canvas id="keyframe-canvas" width="320" height="240"></canvas>
+
+    <!-- AR HUD Overlay -->
+    <div id="ar-hud">
+        <div>
+            <div class="hud-header">
+                <div class="badge-group">
+                    <div class="hud-pill">
+                        <div id="status-dot" class="status-dot"></div>
+                        <span id="conn-text">Connecting...</span>
+                    </div>
+                    <div class="hud-pill" id="fps-badge">
+                        <span>FPS: 60</span>
+                    </div>
+                </div>
+                <div class="hud-pill" id="gesture-pill">
+                    <span>Gesture: <b id="active-gesture-text">NONE</b></span>
+                </div>
+            </div>
+
+            <!-- Pet Speech / Semantic Guidance -->
+            <div class="hud-speech-container">
+                <div class="speech-bubble" id="speech-bubble">
+                    <div class="speech-header">
+                        <span>🐾 MAYA Companion AI</span>
+                        <span id="pet-mode-badge" style="opacity: 0.8;">[IDLE]</span>
+                    </div>
+                    <div id="speech-content">Initializing spatial link... Point your camera at a flat surface or desk.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="hud-footer">
+            <button class="hud-btn secondary" id="recenter-btn">
+                <span>🔄 Recenter Pet</span>
+            </button>
+            <button class="hud-btn" id="interact-btn">
+                <span>✨ Wave at Pet</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Permission & Initialization Modal (Required for iOS/Android camera + IMU gesture permissions) -->
+    <div id="permission-modal">
+        <h1>MAYAwe AR Imager</h1>
+        <p>Distributed Spatial AI Companion<br>Transforms your smartphone into an AR spatial node synchronized with PC Nexus & Aether.</p>
+        <button class="start-btn" id="start-btn">Start Spatial AR Experience</button>
+        <div class="perm-status" id="perm-status">Camera & Motion permissions required.</div>
+    </div>
+
+    <!-- Scripts (Vendored Three.js for 100% offline local Wi-Fi support) -->
+    <script src="js/three.min.js"></script>
     <script src="js/sensors.js"></script>
     <script src="js/stream.js"></script>
     <script src="js/main.js"></script>
